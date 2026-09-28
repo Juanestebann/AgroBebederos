@@ -645,6 +645,247 @@ fun ShedsScreen(
         }
     }
 }
+
+@Composable
+fun HistoryScreen(
+    viewModel: AppViewModel,
+    supervisorMode: Boolean,
+    onNavigate: (String) -> Unit
+) {
+    val offline by viewModel.offline.collectAsState()
+    var period by remember { mutableStateOf("24h") }
+
+    val line = viewModel.selectedLine()
+    val records = viewModel.historyForSelectedLine()
+
+    Scaffold(
+        topBar = {
+            AppTopBar(
+                "Historial de temperatura",
+                "${line.name} · ${viewModel.selectedShed().name}"
+            )
+        },
+        bottomBar = {
+            if (supervisorMode) {
+                SupervisorBottomBar(
+                    Routes.History,
+                    onNavigate
+                )
+            }
+        }
+    ) { inner ->
+
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(inner)
+                .background(Color.White)
+        ) {
+
+            OfflineBanner(offline)
+
+            Column(
+                Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+
+                SectionCard {
+
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+
+                        Text(
+                            "Temperatura",
+                            fontWeight = FontWeight.SemiBold
+                        )
+
+                        Row {
+                            listOf(
+                                "24h",
+                                "7d"
+                            ).forEach { p ->
+
+                                FilterChip(
+                                    selected = period == p,
+                                    onClick = {
+                                        period = p
+                                    },
+                                    label = {
+                                        Text(p)
+                                    }
+                                )
+
+                                Spacer(
+                                    Modifier.width(6.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(
+                        Modifier.height(14.dp)
+                    )
+
+                    TemperatureChart(records)
+                }
+
+                SectionCard {
+
+                    Text(
+                        "Registros",
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Spacer(
+                        Modifier.height(8.dp)
+                    )
+
+                    records
+                        .takeLast(5)
+                        .reversed()
+                        .forEach { record ->
+
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+
+                                Text(
+                                    "${record.date} · ${record.time}",
+                                    modifier = Modifier.weight(1f),
+                                    fontSize = 12.sp
+                                )
+
+                                Text(
+                                    "${record.value}°C",
+                                    fontWeight = FontWeight.Bold
+                                )
+
+                                Spacer(
+                                    Modifier.width(8.dp)
+                                )
+
+                                StatusBadge(
+                                    record.status
+                                )
+                            }
+                        }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TemperatureChart(
+    records: List<TemperatureRecord>
+) {
+    Canvas(
+        Modifier
+            .fillMaxWidth()
+            .height(160.dp)
+    ) {
+
+        if (records.size < 2) {
+            return@Canvas
+        }
+
+        val minY = 16f
+        val maxY = 32f
+
+        val stepX =
+            size.width / (records.size - 1)
+
+        val path = Path()
+
+        records.forEachIndexed { index, record ->
+
+            val x =
+                index * stepX
+
+            val normalized =
+                (
+                        (record.value.toFloat() - minY) /
+                                (maxY - minY)
+                        ).coerceIn(
+                        0f,
+                        1f
+                    )
+
+            val y =
+                size.height -
+                        normalized * size.height
+
+            if (index == 0) {
+                path.moveTo(
+                    x,
+                    y
+                )
+            } else {
+                path.lineTo(
+                    x,
+                    y
+                )
+            }
+        }
+
+        val warningY =
+            size.height -
+                    (
+                            (23f - minY) /
+                                    (maxY - minY)
+                            ) * size.height
+
+        val criticalY =
+            size.height -
+                    (
+                            (27f - minY) /
+                                    (maxY - minY)
+                            ) * size.height
+
+        drawLine(
+            color = Warning,
+            start = Offset(
+                0f,
+                warningY
+            ),
+            end = Offset(
+                size.width,
+                warningY
+            ),
+            strokeWidth = 2f
+        )
+
+        drawLine(
+            color = Critical,
+            start = Offset(
+                0f,
+                criticalY
+            ),
+            end = Offset(
+                size.width,
+                criticalY
+            ),
+            strokeWidth = 2f
+        )
+
+        drawPath(
+            path = path,
+            color = BrandRed,
+            style = Stroke(
+                width = 5f
+            )
+        )
+    }
+}
+
 @Composable
 private fun FlushingCard(
     viewModel: AppViewModel,
