@@ -1,0 +1,25 @@
+# Gradle
+.gradle/
+build/
+**/build/
+
+# Android Studio
+.idea/workspace.xml
+.idea/caches/
+.idea/modules.xml
+.idea/deploymentTargetSelector.xml
+.idea/assetWizardSettings.xml
+
+# Local configuration
+local.properties
+
+# Compilación
+*.apk
+*.aab
+
+# Kotlin
+*.class
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
