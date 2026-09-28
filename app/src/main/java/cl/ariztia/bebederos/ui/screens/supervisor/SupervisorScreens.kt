@@ -885,18 +885,51 @@ private fun TemperatureChart(
         )
     }
 }
+@Composable
+fun FlushingTrackScreen(
+    viewModel: AppViewModel,
+    onNavigate: (String) -> Unit
+) {
+    val flushings by viewModel.flushings.collectAsState()
 
+    Scaffold(
+        topBar = {
+            AppTopBar("Seguimiento de flushing")
+        },
+        bottomBar = {
+            SupervisorBottomBar(
+                Routes.History,
+                onNavigate
+            )
+        }
+    ) { inner ->
+
+        LazyColumn(
+            Modifier
+                .fillMaxSize()
+                .padding(inner)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(flushings.size) {
+                FlushingCard(
+                    viewModel,
+                    flushings[it]
+                )
+            }
+        }
+    }
+}
 @Composable
 private fun FlushingCard(
     viewModel: AppViewModel,
-    flushing: FlushingRecord
+    f: FlushingRecord
 ) {
-    val line = viewModel.line(flushing.lineId)
-    val shed = viewModel.shed(flushing.shedId)
-    val farm = viewModel.farm(flushing.farmId)
+    val line = viewModel.line(f.lineId)
+    val shed = viewModel.shed(f.shedId)
+    val farm = viewModel.farm(f.farmId)
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = Color.White
@@ -907,21 +940,24 @@ private fun FlushingCard(
         )
     ) {
         Column(
-            modifier = Modifier.padding(14.dp)
+            Modifier
+                .fillMaxWidth()
+                .padding(14.dp)
         ) {
+
             Row(
                 verticalAlignment = Alignment.CenterVertically
             ) {
+
                 Icon(
-                    imageVector =
-                        if (flushing.completed) {
-                            Icons.Default.CheckCircle
-                        } else {
-                            Icons.Default.Warning
-                        },
-                    contentDescription = null,
+                    if (f.completed) {
+                        Icons.Default.CheckCircle
+                    } else {
+                        Icons.Default.Warning
+                    },
+                    null,
                     tint =
-                        if (flushing.completed) {
+                        if (f.completed) {
                             Normal
                         } else {
                             Critical
@@ -933,36 +969,34 @@ private fun FlushingCard(
                 )
 
                 Column(
-                    modifier = Modifier.weight(1f)
+                    Modifier.weight(1f)
                 ) {
                     Text(
-                        text = "${line?.name ?: "Línea"} · ${shed?.name ?: "Galpón"}",
+                        "${line?.name} · ${shed?.name}",
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 13.sp
                     )
 
                     Text(
-                        text = farm?.name ?: "Granja",
+                        farm?.name.orEmpty(),
                         fontSize = 11.sp,
                         color = TextSecondary
                     )
                 }
 
                 Text(
-                    text =
-                        if (flushing.completed) {
-                            "Completado"
-                        } else {
-                            "Pendiente"
-                        },
+                    if (f.completed) {
+                        "Completado"
+                    } else {
+                        "Pendiente"
+                    },
                     color =
-                        if (flushing.completed) {
+                        if (f.completed) {
                             Normal
                         } else {
                             Critical
                         },
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold
+                    fontSize = 11.sp
                 )
             }
 
@@ -971,21 +1005,147 @@ private fun FlushingCard(
             )
 
             Text(
-                text = "Operario: ${flushing.operatorName}",
+                "Operario: ${f.operatorName}",
                 fontSize = 12.sp
             )
 
             Text(
-                text = "${flushing.date} · ${flushing.time}",
+                "${f.date} · ${f.time}",
                 fontSize = 12.sp,
                 color = TextSecondary
             )
 
             Text(
-                text = "Motivo: ${flushing.reason}",
+                "Motivo: ${f.reason}",
                 fontSize = 12.sp,
                 color = TextSecondary
             )
+        }
+    }
+}
+@Composable
+fun AlertsSupervisorScreen(
+    viewModel: AppViewModel,
+    onNavigate: (String) -> Unit
+) {
+    val offline by viewModel.offline.collectAsState()
+
+    Scaffold(
+        topBar = {
+            AppTopBar("Alertas")
+        },
+        bottomBar = {
+            SupervisorBottomBar(
+                Routes.AlertsSupervisor,
+                onNavigate
+            )
+        }
+    ) { inner ->
+
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(inner)
+                .background(Color.White)
+        ) {
+
+            OfflineBanner(offline)
+
+            LazyColumn(
+                Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+
+                items(viewModel.alerts.size) { i ->
+
+                    val alert = viewModel.alerts[i]
+
+                    val line =
+                        viewModel.line(alert.lineId)!!
+
+                    val shed =
+                        viewModel.shed(alert.shedId)!!
+
+                    val farm =
+                        viewModel.farm(alert.farmId)!!
+
+                    val (color, bg) =
+                        statusColors(alert.status)
+
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = bg
+                        ),
+                        border = BorderStroke(
+                            1.dp,
+                            color
+                        ),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+
+                        Column(
+                            Modifier.padding(14.dp)
+                        ) {
+
+                            Row {
+
+                                Column(
+                                    Modifier.weight(1f)
+                                ) {
+
+                                    Text(
+                                        "${line.name} · ${shed.name}",
+                                        color = color,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+
+                                    Text(
+                                        "${farm.name} · ${alert.date} ${alert.time}",
+                                        fontSize = 11.sp,
+                                        color = TextSecondary
+                                    )
+                                }
+
+                                Text(
+                                    "${alert.temperature}°C",
+                                    color = color,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 20.sp
+                                )
+                            }
+
+                            Spacer(
+                                Modifier.height(8.dp)
+                            )
+
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.selectFarm(
+                                        alert.farmId
+                                    )
+
+                                    viewModel.selectShed(
+                                        alert.shedId
+                                    )
+
+                                    viewModel.selectLine(
+                                        alert.lineId
+                                    )
+
+                                    onNavigate(
+                                        Routes.LineDetail
+                                    )
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Ver detalle")
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
