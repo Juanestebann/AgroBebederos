@@ -245,14 +245,18 @@ fun FlushingScreen(viewModel: AppViewModel, onBack: () -> Unit, onSuccess: () ->
                 Text("Adjunta una fotografía del flushing realizado.", fontSize = 11.sp, color = TextSecondary)
                 Spacer(Modifier.height(8.dp))
                 if (photoUri == null) {
-                    OutlinedButton(onClick = { pendingUri = createImageUri(context); launcher.launch(pendingUri) }, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { pendingUri = createImageUri(context); launcher.launch(
+                        pendingUri!!
+                    ) }, modifier = Modifier.fillMaxWidth()) {
                         Icon(Icons.Default.CameraAlt, null); Spacer(Modifier.width(6.dp)); Text("Tomar fotografía")
                     }
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.CheckCircle, null, tint = Normal)
                         Spacer(Modifier.width(8.dp)); Text("Evidencia adjuntada", color = Normal, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { pendingUri = createImageUri(context); launcher.launch(pendingUri) }) { Text("Repetir") }
+                        TextButton(onClick = { pendingUri = createImageUri(context); launcher.launch(
+                            pendingUri!!
+                        ) }) { Text("Repetir") }
                         TextButton(onClick = { photoUri = null }) { Text("Eliminar", color = Critical) }
                     }
                 }
