@@ -1,137 +1,89 @@
 package cl.ariztia.bebederos
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import cl.ariztia.bebederos.ui.navigation.Routes
-import cl.ariztia.bebederos.ui.screens.operario.AlertsOperarioScreen
-import cl.ariztia.bebederos.ui.screens.operario.FlushingOkScreen
-import cl.ariztia.bebederos.ui.screens.operario.FlushingScreen
-import cl.ariztia.bebederos.ui.screens.operario.HomeOperarioScreen
-import cl.ariztia.bebederos.ui.screens.operario.LineDetailScreen
-import cl.ariztia.bebederos.ui.screens.operario.LinesScreen
+import cl.ariztia.bebederos.data.model.TemperatureStatus
+import cl.ariztia.bebederos.ui.navigation.AppNavGraph
 import cl.ariztia.bebederos.ui.theme.BebederosTheme
+import cl.ariztia.bebederos.util.NotificationHelper
 import cl.ariztia.bebederos.viewmodel.AppViewModel
 
 class MainActivity : ComponentActivity() {
 
+    private val notificationPermissionLauncher =
+        registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        enableEdgeToEdge()
+        NotificationHelper.createChannel(this)
+
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(
+                Manifest.permission.POST_NOTIFICATIONS
+            )
+        }
 
         setContent {
+
             BebederosTheme {
-                OperatorTestApp()
+
+                val navController = rememberNavController()
+
+                val appViewModel: AppViewModel = viewModel()
+
+                val currentUser by
+                appViewModel.currentUser.collectAsState()
+
+                val criticalNotificationsEnabled by
+                appViewModel.criticalNotifications.collectAsState()
+
+                LaunchedEffect(
+                    currentUser,
+                    criticalNotificationsEnabled
+                ) {
+                    if (
+                        currentUser != null &&
+                        criticalNotificationsEnabled
+                    ) {
+                        val criticalLine =
+                            appViewModel.lines.firstOrNull { line ->
+                                line.status == TemperatureStatus.CRITICAL
+                            }
+
+                        if (criticalLine != null) {
+                            NotificationHelper.showCritical(
+                                this@MainActivity,
+                                criticalLine
+                            )
+                        }
+                    }
+                }
+
+                AppNavGraph(
+                    navController = navController,
+                    viewModel = appViewModel
+                )
             }
-        }
-    }
-}
-
-@Composable
-private fun OperatorTestApp() {
-
-    val navController = rememberNavController()
-    val appViewModel: AppViewModel = viewModel()
-
-    /*
-     * Login automático TEMPORAL para poder probar
-     * registerFlushing(), porque AppViewModel exige
-     * que exista un currentUser.
-     */
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        appViewModel.updateEmail("operario@ariztia.cl")
-        appViewModel.updatePassword("Demo123")
-        appViewModel.login()
-    }
-
-    NavHost(
-        navController = navController,
-        startDestination = Routes.HomeOperario
-    ) {
-
-        composable(Routes.HomeOperario) {
-            HomeOperarioScreen(
-                viewModel = appViewModel,
-                onNavigate = { route ->
-                    navController.navigate(route)
-                }
-            )
-        }
-
-        composable(Routes.Lines) {
-            LinesScreen(
-                viewModel = appViewModel,
-                supervisorMode = false,
-                onNavigate = { route ->
-                    navController.navigate(route)
-                }
-            )
-        }
-
-        composable(Routes.LineDetail) {
-            LineDetailScreen(
-                viewModel = appViewModel,
-                supervisorMode = false,
-                onBack = {
-                    navController.popBackStack()
-                },
-                onNavigate = { route ->
-                    navController.navigate(route)
-                }
-            )
-        }
-
-        composable(Routes.Flushing) {
-            FlushingScreen(
-                viewModel = appViewModel,
-                onBack = {
-                    navController.popBackStack()
-                },
-                onSuccess = {
-                    navController.navigate(Routes.FlushingOk) {
-                        popUpTo(Routes.Flushing) {
-                            inclusive = true
-                        }
-                    }
-                }
-            )
-        }
-
-        composable(Routes.FlushingOk) {
-            FlushingOkScreen(
-                onHome = {
-                    navController.navigate(Routes.HomeOperario) {
-                        popUpTo(Routes.HomeOperario) {
-                            inclusive = true
-                        }
-                    }
-                }
-            )
-        }
-
-        composable(Routes.AlertsOperario) {
-            AlertsOperarioScreen(
-                viewModel = appViewModel,
-                onNavigate = { route ->
-                    navController.navigate(route)
-                }
-            )
-        }
-
-        /*
-         * El historial pertenece a la integración posterior.
-         * Dejamos un destino temporal para que no crashee.
-         */
-        composable(Routes.History) {
-            Text("Historial: pendiente de integración del Supervisor")
         }
     }
 }
