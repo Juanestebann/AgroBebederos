@@ -3,26 +3,22 @@ package cl.ariztia.bebederos.util
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
-import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import cl.ariztia.bebederos.R
 import cl.ariztia.bebederos.data.model.WaterLine
 
 object NotificationHelper {
     private const val CHANNEL_ID = "critical_temperature"
 
     fun createChannel(context: Context) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Alertas críticas de temperatura",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Avisos cuando una línea alcanza temperatura crítica"
-            }
-            context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Alertas críticas de temperatura",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Avisos cuando una línea alcanza temperatura crítica"
         }
+        context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
     fun showCritical(context: Context, line: WaterLine) {

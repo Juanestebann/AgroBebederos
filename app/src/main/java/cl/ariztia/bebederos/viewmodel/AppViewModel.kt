@@ -28,7 +28,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val flushingDao = database.flushingDao()
 
     val farms = repository.farms
-    val sheds = repository.sheds
     val lines = repository.lines
     val alerts = repository.alerts
 
@@ -36,13 +35,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val currentUser = _currentUser.asStateFlow()
 
     private val _selectedFarmId = MutableStateFlow(1)
-    val selectedFarmId = _selectedFarmId.asStateFlow()
 
     private val _selectedShedId = MutableStateFlow(1)
-    val selectedShedId = _selectedShedId.asStateFlow()
 
     private val _selectedLineId = MutableStateFlow(3)
-    val selectedLineId = _selectedLineId.asStateFlow()
 
     private val _login = MutableStateFlow(LoginUiState())
     val login = _login.asStateFlow()
