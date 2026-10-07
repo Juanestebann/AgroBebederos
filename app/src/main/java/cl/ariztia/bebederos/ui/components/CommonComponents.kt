@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -56,7 +57,7 @@ fun AppTopBar(title: String, subtitle: String? = null, onBack: (() -> Unit)? = n
         },
         navigationIcon = {
             onBack?.let {
-                IconButton(onClick = it) { Icon(Icons.Default.ArrowBack, null, tint = BrandRed) }
+                IconButton(onClick = it) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = BrandRed) }
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)

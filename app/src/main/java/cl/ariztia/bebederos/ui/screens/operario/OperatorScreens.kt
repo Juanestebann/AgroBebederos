@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -80,7 +81,7 @@ fun HomeOperarioScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) {
                 Text("Alertas activas", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                 viewModel.alerts.take(2).forEach { alert -> AlertCompact(viewModel, alert) { onNavigate(Routes.LineDetail) } }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Box(Modifier.weight(1f)) { QuickAction(Icons.Default.List, "Consultar líneas", BrandRed) { onNavigate(Routes.Lines) } }
+                    Box(Modifier.weight(1f)) { QuickAction(Icons.AutoMirrored.Filled.List, "Consultar líneas", BrandRed) { onNavigate(Routes.Lines) } }
                     Box(Modifier.weight(1f)) { QuickAction(Icons.Default.Notifications, "Ver alertas", Critical) { onNavigate(Routes.AlertsOperario) } }
                     Box(Modifier.weight(1f)) { QuickAction(Icons.Default.WaterDrop, "Registrar flushing", Normal) {
                         viewModel.selectFarm(1); viewModel.selectShed(2); viewModel.selectLine(3); onNavigate(Routes.Flushing)
