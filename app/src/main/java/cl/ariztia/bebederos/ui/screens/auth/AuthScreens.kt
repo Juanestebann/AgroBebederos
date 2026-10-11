@@ -1,9 +1,17 @@
 package cl.ariztia.bebederos.ui.screens.auth
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.WaterDrop
@@ -22,6 +30,7 @@ import cl.ariztia.bebederos.ui.theme.*
 import cl.ariztia.bebederos.viewmodel.AppViewModel
 import kotlinx.coroutines.delay
 
+/** Pantalla temporal de arranque; su efecto navega una vez tras la pausa visual. */
 @Composable
 fun SplashScreen(onDone: () -> Unit) {
     LaunchedEffect(Unit) { delay(1300); onDone() }
@@ -70,13 +79,19 @@ fun SplashScreen(onDone: () -> Unit) {
         Spacer(Modifier.height(48.dp))
 
         Text(
-            "Monitoreo de temperatura · Líneas de bebederos",
+            "Consulta demostrativa · Líneas de bebederos",
             color = Color.White.copy(alpha = .72f),
             fontSize = 12.sp
         )
     }
 }
 
+/**
+ * Formulario de autenticación demostrativa.
+ *
+ * El estado de campos/errores pertenece al ViewModel; los booleanos recordados son solo detalles
+ * efímeros de esta composición. [onLoggedIn] desacopla la autenticación de la navegación.
+ */
 @Composable
 fun LoginScreen(
     viewModel: AppViewModel,
@@ -84,6 +99,26 @@ fun LoginScreen(
 ) {
     val state by viewModel.login.collectAsState()
     var showPassword by remember { mutableStateOf(false) }
+    var showRecoveryInfo by remember { mutableStateOf(false) }
+
+    if (showRecoveryInfo) {
+        AlertDialog(
+            onDismissRequest = { showRecoveryInfo = false },
+            icon = { Icon(Icons.Default.Info, contentDescription = null) },
+            title = { Text("Recuperación no disponible") },
+            text = {
+                Text(
+                    "Esta versión académica y demostrativa no está conectada a un servicio de recuperación. " +
+                            "Utiliza una de las credenciales demo indicadas en esta pantalla."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showRecoveryInfo = false }) {
+                    Text("Entendido")
+                }
+            }
+        )
+    }
 
     Column(
         Modifier
@@ -124,7 +159,7 @@ fun LoginScreen(
             )
 
             Text(
-                "Monitorea la temperatura de los bebederos desde tu celular.",
+                "Consulta temperaturas demostrativas y registra flushing local.",
                 color = TextSecondary,
                 fontSize = 13.sp
             )
@@ -140,6 +175,11 @@ fun LoginScreen(
                 supportingText = {
                     state.emailError?.let { Text(it) }
                 },
+                trailingIcon = {
+                    if (state.emailError != null) {
+                        Icon(Icons.Default.Error, contentDescription = "Error en el correo")
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
@@ -153,6 +193,11 @@ fun LoginScreen(
                 isError = state.passwordError != null,
                 supportingText = {
                     state.passwordError?.let { Text(it) }
+                },
+                leadingIcon = {
+                    if (state.passwordError != null) {
+                        Icon(Icons.Default.Error, contentDescription = "Error en la contraseña")
+                    }
                 },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
@@ -172,13 +217,13 @@ fun LoginScreen(
                                 Icons.Default.VisibilityOff
                             else
                                 Icons.Default.Visibility,
-                            null
+                            if (showPassword) "Ocultar contraseña" else "Mostrar contraseña"
                         )
                     }
                 }
             )
 
-            TextButton(onClick = {}) {
+            TextButton(onClick = { showRecoveryInfo = true }) {
                 Text("¿Olvidaste tu contraseña?")
             }
 
@@ -197,21 +242,40 @@ fun LoginScreen(
                 )
             }
 
-            state.credentialsError?.let {
-                Spacer(Modifier.height(10.dp))
+            AnimatedVisibility(
+                visible = state.credentialsError != null,
+                enter = fadeIn(tween(durationMillis = 160)) +
+                        expandVertically(tween(durationMillis = 180)),
+                exit = fadeOut(tween(durationMillis = 120)) +
+                        shrinkVertically(tween(durationMillis = 160))
+            ) {
+                Column {
+                    Spacer(Modifier.height(10.dp))
 
-                Text(
-                    it,
-                    color = Critical,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            CriticalBg,
-                            RoundedCornerShape(10.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                CriticalBg,
+                                RoundedCornerShape(10.dp)
+                            )
+                            .padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Error,
+                            contentDescription = "Error de autenticación",
+                            tint = Critical,
+                            modifier = Modifier.size(18.dp)
                         )
-                        .padding(10.dp),
-                    fontSize = 12.sp
-                )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            state.credentialsError.orEmpty(),
+                            color = Critical,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
             }
 
             Spacer(Modifier.height(18.dp))
