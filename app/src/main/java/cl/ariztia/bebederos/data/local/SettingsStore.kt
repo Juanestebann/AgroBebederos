@@ -9,13 +9,21 @@ import kotlinx.coroutines.flow.map
 
 private val Context.dataStore by preferencesDataStore("bebederos_settings")
 
+/**
+ * Preferencias pequeñas persistidas con DataStore.
+ *
+ * Se almacenan la presentación ampliada del origen de datos y la habilitación de avisos locales;
+ * los registros de flushing pertenecen a Room y no a este almacén.
+ */
 class SettingsStore(private val context: Context) {
     private val offlineKey = booleanPreferencesKey("offline_mode")
     private val notificationsKey = booleanPreferencesKey("critical_notifications")
 
+    /** Flujo que vuelve a emitir cuando cambia la preferencia visual de origen de datos. */
     val offline: Flow<Boolean> =
         context.dataStore.data.map { it[offlineKey] ?: false }
 
+    /** Flujo de preferencia para avisos locales demostrativos. */
     val notifications: Flow<Boolean> =
         context.dataStore.data.map { it[notificationsKey] ?: true }
 
