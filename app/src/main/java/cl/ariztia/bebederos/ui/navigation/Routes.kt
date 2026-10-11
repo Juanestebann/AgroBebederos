@@ -1,5 +1,6 @@
 package cl.ariztia.bebederos.ui.navigation
 
+/** Identificadores estables usados por Navigation Compose para cada destino. */
 object Routes {
     const val Splash = "splash"
     const val Login = "login"

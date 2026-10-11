@@ -19,32 +19,31 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cl.ariztia.bebederos.data.model.TemperatureStatus
+import cl.ariztia.bebederos.data.model.displayLabel
 import cl.ariztia.bebederos.ui.theme.*
 
+/** Devuelve color de contenido y fondo desde el mismo estado térmico usado por el modelo. */
 fun statusColors(status: TemperatureStatus): Pair<Color, Color> = when (status) {
     TemperatureStatus.NORMAL -> Normal to NormalBg
     TemperatureStatus.WARNING -> Warning to WarningBg
     TemperatureStatus.CRITICAL -> Critical to CriticalBg
 }
 
+/** Badge reutilizable que presenta el estado con etiqueta en español y colores consistentes. */
 @Composable
 fun StatusBadge(status: TemperatureStatus) {
     val (color, background) = statusColors(status)
-    val label = when (status) {
-        TemperatureStatus.NORMAL -> "Normal"
-        TemperatureStatus.WARNING -> "Advertencia"
-        TemperatureStatus.CRITICAL -> "Crítico"
-    }
     Row(
         modifier = Modifier.background(background, RoundedCornerShape(100.dp)).padding(horizontal = 9.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp)
     ) {
         Box(Modifier.size(6.dp).background(color, CircleShape))
-        Text(label, color = color, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Text(status.displayLabel, color = color, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
+/** Barra superior opcionalmente jerárquica; [onBack] controla la presencia de la flecha. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppTopBar(title: String, subtitle: String? = null, onBack: (() -> Unit)? = null) {
@@ -64,9 +63,9 @@ fun AppTopBar(title: String, subtitle: String? = null, onBack: (() -> Unit)? = n
     )
 }
 
+/** Leyenda contextual que diferencia catálogo demo y registros locales persistidos. */
 @Composable
-fun OfflineBanner(visible: Boolean) {
-    if (!visible) return
+fun LocalDataBanner(showDetails: Boolean, measurementDate: String? = null) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
             .background(Color(0xFFF2F2F2), RoundedCornerShape(12.dp))
@@ -74,12 +73,42 @@ fun OfflineBanner(visible: Boolean) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Icon(Icons.Default.CloudOff, null, tint = TextSecondary, modifier = Modifier.size(18.dp))
-        Text("Sin conexión", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        Text("· Datos guardados a las 14:28", fontSize = 11.sp, color = TextSecondary)
+        Icon(Icons.Default.Storage, null, tint = TextSecondary, modifier = Modifier.size(18.dp))
+        Column {
+            Text("Origen de los datos", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                if (showDetails) {
+                    combinedDataOriginDescription(measurementDate)
+                } else {
+                    compactDataOriginDescription(measurementDate)
+                },
+                fontSize = 11.sp,
+                color = TextSecondary
+            )
+        }
     }
 }
 
+/** Leyenda exclusiva para listados cuyo contenido proviene de Room. */
+@Composable
+fun LocalRecordsBanner() {
+    Row(
+        Modifier.fillMaxWidth()
+            .background(Color(0xFFF2F2F2), RoundedCornerShape(12.dp))
+            .border(1.dp, Border, RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Icon(Icons.Default.Storage, null, tint = TextSecondary, modifier = Modifier.size(18.dp))
+        Column {
+            Text("Registros locales persistidos", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(localRecordsDescription(), fontSize = 11.sp, color = TextSecondary)
+        }
+    }
+}
+
+/** Contenedor Material 3 compartido para secciones de contenido. */
 @Composable
 fun SectionCard(content: @Composable ColumnScope.() -> Unit) {
     Card(
