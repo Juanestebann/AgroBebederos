@@ -13,25 +13,34 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cl.ariztia.bebederos.data.model.*
 import cl.ariztia.bebederos.ui.components.*
+import cl.ariztia.bebederos.ui.navigation.OperatorBottomBar
 import cl.ariztia.bebederos.ui.navigation.Routes
 import cl.ariztia.bebederos.ui.navigation.SupervisorBottomBar
 import cl.ariztia.bebederos.ui.theme.*
 import cl.ariztia.bebederos.viewmodel.AppViewModel
+import cl.ariztia.bebederos.viewmodel.FlushingListUiState
+import cl.ariztia.bebederos.viewmodel.records
 
+/** Dashboard global del supervisor con conteos derivados y flushing observados desde Room. */
 @Composable
 fun HomeSupervisorScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) {
     val offline by viewModel.offline.collectAsState()
     val user by viewModel.currentUser.collectAsState()
-    val flushings by viewModel.flushings.collectAsState()
+    val flushingList by viewModel.flushingList.collectAsState()
+    val effectiveLines by viewModel.effectiveLines.collectAsState()
+    val relatedSheds = viewModel.farms.flatMap { viewModel.shedsForFarm(it.id) }
+    val relatedLines = effectiveLines.filter { line ->
+        viewModel.farms.any { it.id == line.farmId }
+    }
+    val statusCounts = relatedLines
+        .groupingBy { it.status }
+        .eachCount()
 
     Scaffold(
         bottomBar = {
@@ -60,19 +69,19 @@ fun HomeSupervisorScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) 
                 )
 
                 Text(
-                    user?.name ?: "Carlos Morales",
+                    user?.name ?: "Supervisor",
                     fontSize = 21.sp,
                     fontWeight = FontWeight.Bold
                 )
 
                 Text(
-                    "Vista general · Todas las granjas",
+                    "Datos demostrativos · Todas las granjas",
                     color = TextSecondary,
                     fontSize = 12.sp
                 )
             }
 
-            OfflineBanner(offline)
+            LocalDataBanner(offline, viewModel.lines.firstOrNull()?.measurementDate)
 
             Column(
                 Modifier
@@ -86,7 +95,7 @@ fun HomeSupervisorScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) 
                 ) {
                     Box(Modifier.weight(1f)) {
                         SummaryTile(
-                            "3",
+                            viewModel.farms.size.toString(),
                             "Granjas",
                             BrandRed,
                             BrandRedLight
@@ -95,7 +104,7 @@ fun HomeSupervisorScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) 
 
                     Box(Modifier.weight(1f)) {
                         SummaryTile(
-                            "9",
+                            relatedSheds.size.toString(),
                             "Galpones",
                             Color(0xFF6A1B9A),
                             Color(0xFFEDE7F6)
@@ -104,7 +113,7 @@ fun HomeSupervisorScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) 
 
                     Box(Modifier.weight(1f)) {
                         SummaryTile(
-                            "14",
+                            relatedLines.size.toString(),
                             "Líneas",
                             Normal,
                             NormalBg
@@ -126,7 +135,7 @@ fun HomeSupervisorScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) 
                     ) {
                         Box(Modifier.weight(1f)) {
                             SummaryTile(
-                                "10",
+                                (statusCounts[TemperatureStatus.NORMAL] ?: 0).toString(),
                                 "Normales",
                                 Normal,
                                 NormalBg
@@ -135,7 +144,7 @@ fun HomeSupervisorScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) 
 
                         Box(Modifier.weight(1f)) {
                             SummaryTile(
-                                "3",
+                                (statusCounts[TemperatureStatus.WARNING] ?: 0).toString(),
                                 "Advertencia",
                                 Warning,
                                 WarningBg
@@ -144,7 +153,7 @@ fun HomeSupervisorScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) 
 
                         Box(Modifier.weight(1f)) {
                             SummaryTile(
-                                "1",
+                                (statusCounts[TemperatureStatus.CRITICAL] ?: 0).toString(),
                                 "Críticas",
                                 Critical,
                                 CriticalBg
@@ -154,7 +163,7 @@ fun HomeSupervisorScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) 
                 }
 
                 Text(
-                    "Eventos críticos",
+                    "Eventos críticos demostrativos",
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 13.sp
                 )
@@ -165,16 +174,15 @@ fun HomeSupervisorScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) 
                     }
                     .forEach { alert ->
 
-                        val line =
-                            viewModel.line(alert.lineId)!!
+                        val location = viewModel.resolveAlertLocation(alert)
 
-                        val shed =
-                            viewModel.shed(alert.shedId)!!
-
-                        val farm =
-                            viewModel.farm(alert.farmId)!!
-
-                        Row(
+                        if (location == null) {
+                            Text(
+                                "No se pudo cargar la ubicación del evento crítico.",
+                                color = Critical,
+                                fontSize = 12.sp
+                            )
+                        } else Row(
                             Modifier
                                 .fillMaxWidth()
                                 .background(
@@ -182,21 +190,9 @@ fun HomeSupervisorScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) 
                                     RoundedCornerShape(12.dp)
                                 )
                                 .clickable {
-                                    viewModel.selectFarm(
-                                        alert.farmId
-                                    )
-
-                                    viewModel.selectShed(
-                                        alert.shedId
-                                    )
-
-                                    viewModel.selectLine(
-                                        alert.lineId
-                                    )
-
-                                    onNavigate(
-                                        Routes.LineDetail
-                                    )
+                                    if (viewModel.selectAlertLocation(alert)) {
+                                        onNavigate(Routes.LineDetail)
+                                    }
                                 }
                                 .padding(12.dp),
                             verticalAlignment =
@@ -212,14 +208,14 @@ fun HomeSupervisorScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) 
 
                             Column {
                                 Text(
-                                    "${line.name} · ${shed.name} · ${farm.name}",
+                                    "${location.line.name} · ${location.shed.name} · ${location.farm.name}",
                                     color = Critical,
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 12.sp
                                 )
 
                                 Text(
-                                    "${alert.temperature}°C · ${alert.time}",
+                                    "${alert.temperature}°C · ${demoAlertTimestamp(alert.date, alert.time)}",
                                     fontSize = 11.sp,
                                     color = TextSecondary
                                 )
@@ -235,7 +231,7 @@ fun HomeSupervisorScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) 
                         Alignment.CenterVertically
                 ) {
                     Text(
-                        "Últimos flushing",
+                        "Últimos flushing guardados",
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 13.sp
                     )
@@ -251,19 +247,43 @@ fun HomeSupervisorScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) 
                     }
                 }
 
-                flushings
-                    .take(2)
-                    .forEach { f ->
-                        FlushingCard(
-                            viewModel,
-                            f
-                        )
+                Text(
+                    localRecordsDescription(),
+                    color = TextSecondary,
+                    fontSize = 11.sp
+                )
+
+                when (val state = flushingList) {
+                    FlushingListUiState.Loading -> Text(
+                        "Cargando registros de flushing…",
+                        color = TextSecondary,
+                        fontSize = 12.sp
+                    )
+                    FlushingListUiState.Error -> Text(
+                        "No se pudieron cargar los registros de flushing.",
+                        color = Critical,
+                        fontSize = 12.sp
+                    )
+                    is FlushingListUiState.Ready -> {
+                        if (state.records.isEmpty()) {
+                            Text(
+                                "No hay registros de flushing.",
+                                color = TextSecondary,
+                                fontSize = 12.sp
+                            )
+                        } else {
+                            state.records.take(2).forEach { flushing ->
+                                FlushingCard(viewModel, flushing)
+                            }
+                        }
                     }
+                }
             }
         }
     }
 }
 
+/** Entrada a la jerarquía de granjas; los conteos se derivan de relaciones validadas. */
 @Composable
 fun FarmsScreen(
     viewModel: AppViewModel,
@@ -271,6 +291,7 @@ fun FarmsScreen(
 ) {
     val offline by
     viewModel.offline.collectAsState()
+    val effectiveLines by viewModel.effectiveLines.collectAsState()
 
     Scaffold(
         topBar = {
@@ -289,7 +310,7 @@ fun FarmsScreen(
                 .padding(inner)
                 .background(Color.White)
         ) {
-            OfflineBanner(offline)
+            LocalDataBanner(offline, viewModel.lines.firstOrNull()?.measurementDate)
 
             LazyColumn(
                 Modifier
@@ -304,10 +325,7 @@ fun FarmsScreen(
                     val farm =
                         viewModel.farms[i]
 
-                    val lines =
-                        viewModel.linesForFarm(
-                            farm.id
-                        )
+                    val lines = effectiveLines.filter { it.farmId == farm.id }
 
                     val counts =
                         lines
@@ -380,7 +398,7 @@ fun FarmsScreen(
                                     )
 
                                     Text(
-                                        "${farm.shedIds.size} galpones",
+                                        "${viewModel.shedCountForFarm(farm)} galpones",
                                         fontSize =
                                             11.sp,
                                         color =
@@ -469,12 +487,15 @@ fun FarmsScreen(
     }
 }
 
+/** Galpones de la granja seleccionada, sin mezclar relaciones de otras granjas. */
 @Composable
 fun ShedsScreen(
     viewModel: AppViewModel,
     onBack: () -> Unit,
     onNavigate: (String) -> Unit
 ) {
+    val offline by viewModel.offline.collectAsState()
+    val effectiveLines by viewModel.effectiveLines.collectAsState()
     val farm =
         viewModel.selectedFarm()
 
@@ -497,408 +518,284 @@ fun ShedsScreen(
         }
     ) { inner ->
 
-        LazyColumn(
-            Modifier
-                .fillMaxSize()
-                .padding(inner)
-                .padding(16.dp),
-            verticalArrangement =
-                Arrangement.spacedBy(12.dp)
-        ) {
-            items(sheds.size) { i ->
-
-                val shed =
-                    sheds[i]
-
-                val lines =
-                    viewModel.lines.filter {
-                        it.shedId == shed.id
-                    }
-
-                val counts =
-                    lines
-                        .groupingBy {
-                            it.status
-                        }
-                        .eachCount()
-
-                Card(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            viewModel.selectShed(
-                                shed.id
-                            )
-
-                            onNavigate(
-                                Routes.Lines
-                            )
-                        },
-                    shape =
-                        RoundedCornerShape(
-                            18.dp
-                        ),
-                    colors =
-                        CardDefaults.cardColors(
-                            containerColor =
-                                Color.White
-                        ),
-                    border =
-                        BorderStroke(
-                            1.dp,
-                            Border
-                        )
-                ) {
-                    Column(
-                        Modifier.padding(
-                            16.dp
-                        )
-                    ) {
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement =
-                                Arrangement
-                                    .SpaceBetween
-                        ) {
-                            Text(
-                                shed.name,
-                                fontWeight =
-                                    FontWeight
-                                        .SemiBold
-                            )
-
-                            Text(
-                                "${lines.size} líneas",
-                                color =
-                                    TextSecondary,
-                                fontSize =
-                                    12.sp
-                            )
-                        }
-
-                        Spacer(
-                            Modifier.height(
-                                10.dp
-                            )
-                        )
-
-                        Row(
-                            horizontalArrangement =
-                                Arrangement.spacedBy(
-                                    8.dp
-                                )
-                        ) {
-                            Box(
-                                Modifier.weight(
-                                    1f
-                                )
-                            ) {
-                                SummaryTile(
-                                    (
-                                            counts[
-                                                TemperatureStatus.NORMAL
-                                            ] ?: 0
-                                            ).toString(),
-                                    "Normal",
-                                    Normal,
-                                    NormalBg
-                                )
-                            }
-
-                            Box(
-                                Modifier.weight(
-                                    1f
-                                )
-                            ) {
-                                SummaryTile(
-                                    (
-                                            counts[
-                                                TemperatureStatus.WARNING
-                                            ] ?: 0
-                                            ).toString(),
-                                    "Advert.",
-                                    Warning,
-                                    WarningBg
-                                )
-                            }
-
-                            Box(
-                                Modifier.weight(
-                                    1f
-                                )
-                            ) {
-                                SummaryTile(
-                                    (
-                                            counts[
-                                                TemperatureStatus.CRITICAL
-                                            ] ?: 0
-                                            ).toString(),
-                                    "Crítico",
-                                    Critical,
-                                    CriticalBg
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun HistoryScreen(
-    viewModel: AppViewModel,
-    supervisorMode: Boolean,
-    onNavigate: (String) -> Unit
-) {
-    val offline by viewModel.offline.collectAsState()
-    var period by remember { mutableStateOf("24h") }
-
-    val line = viewModel.selectedLine()
-    val records = viewModel.historyForSelectedLine()
-
-    Scaffold(
-        topBar = {
-            AppTopBar(
-                "Historial de temperatura",
-                "${line.name} · ${viewModel.selectedShed().name}"
-            )
-        },
-        bottomBar = {
-            if (supervisorMode) {
-                SupervisorBottomBar(
-                    Routes.History,
-                    onNavigate
-                )
-            }
-        }
-    ) { inner ->
-
         Column(
             Modifier
                 .fillMaxSize()
                 .padding(inner)
                 .background(Color.White)
         ) {
+            LocalDataBanner(offline, viewModel.lines.firstOrNull()?.measurementDate)
 
-            OfflineBanner(offline)
-
-            Column(
+            LazyColumn(
                 Modifier
-                    .verticalScroll(rememberScrollState())
+                    .fillMaxSize()
                     .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                verticalArrangement =
+                    Arrangement.spacedBy(12.dp)
             ) {
+                items(sheds.size) { i ->
 
-                SectionCard {
+                    val shed =
+                        sheds[i]
 
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    val lines = effectiveLines.filter {
+                        it.farmId == farm.id && it.shedId == shed.id
+                    }
+
+                    val counts =
+                        lines
+                            .groupingBy {
+                                it.status
+                            }
+                            .eachCount()
+
+                    Card(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                viewModel.selectShed(
+                                    shed.id
+                                )
+
+                                onNavigate(
+                                    Routes.Lines
+                                )
+                            },
+                        shape =
+                            RoundedCornerShape(
+                                18.dp
+                            ),
+                        colors =
+                            CardDefaults.cardColors(
+                                containerColor =
+                                    Color.White
+                            ),
+                        border =
+                            BorderStroke(
+                                1.dp,
+                                Border
+                            )
                     ) {
-
-                        Text(
-                            "Temperatura",
-                            fontWeight = FontWeight.SemiBold
-                        )
-
-                        Row {
-                            listOf(
-                                "24h",
-                                "7d"
-                            ).forEach { p ->
-
-                                FilterChip(
-                                    selected = period == p,
-                                    onClick = {
-                                        period = p
-                                    },
-                                    label = {
-                                        Text(p)
-                                    }
+                        Column(
+                            Modifier.padding(
+                                16.dp
+                            )
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement =
+                                    Arrangement
+                                        .SpaceBetween
+                            ) {
+                                Text(
+                                    shed.name,
+                                    fontWeight =
+                                        FontWeight
+                                            .SemiBold
                                 )
 
-                                Spacer(
-                                    Modifier.width(6.dp)
+                                Text(
+                                    "${lines.size} líneas",
+                                    color =
+                                        TextSecondary,
+                                    fontSize =
+                                        12.sp
                                 )
+                            }
+
+                            Spacer(
+                                Modifier.height(
+                                    10.dp
+                                )
+                            )
+
+                            Row(
+                                horizontalArrangement =
+                                    Arrangement.spacedBy(
+                                        8.dp
+                                    )
+                            ) {
+                                Box(
+                                    Modifier.weight(
+                                        1f
+                                    )
+                                ) {
+                                    SummaryTile(
+                                        (
+                                                counts[
+                                                    TemperatureStatus.NORMAL
+                                                ] ?: 0
+                                                ).toString(),
+                                        "Normal",
+                                        Normal,
+                                        NormalBg
+                                    )
+                                }
+
+                                Box(
+                                    Modifier.weight(
+                                        1f
+                                    )
+                                ) {
+                                    SummaryTile(
+                                        (
+                                                counts[
+                                                    TemperatureStatus.WARNING
+                                                ] ?: 0
+                                                ).toString(),
+                                        "Advert.",
+                                        Warning,
+                                        WarningBg
+                                    )
+                                }
+
+                                Box(
+                                    Modifier.weight(
+                                        1f
+                                    )
+                                ) {
+                                    SummaryTile(
+                                        (
+                                                counts[
+                                                    TemperatureStatus.CRITICAL
+                                                ] ?: 0
+                                                ).toString(),
+                                        "Crítico",
+                                        Critical,
+                                        CriticalBg
+                                    )
+                                }
                             }
                         }
                     }
-
-                    Spacer(
-                        Modifier.height(14.dp)
-                    )
-
-                    TemperatureChart(records)
-                }
-
-                SectionCard {
-
-                    Text(
-                        "Registros",
-                        fontWeight = FontWeight.SemiBold
-                    )
-
-                    Spacer(
-                        Modifier.height(8.dp)
-                    )
-
-                    records
-                        .takeLast(5)
-                        .reversed()
-                        .forEach { record ->
-
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 7.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-
-                                Text(
-                                    "${record.date} · ${record.time}",
-                                    modifier = Modifier.weight(1f),
-                                    fontSize = 12.sp
-                                )
-
-                                Text(
-                                    "${record.value}°C",
-                                    fontWeight = FontWeight.Bold
-                                )
-
-                                Spacer(
-                                    Modifier.width(8.dp)
-                                )
-
-                                StatusBadge(
-                                    record.status
-                                )
-                            }
-                        }
                 }
             }
         }
     }
 }
 
+/**
+ * Historial de flushing de la línea seleccionada para cualquiera de los dos roles.
+ *
+ * `remember(flushingList, line)` recalcula el filtro cuando Room emite o cambia la selección. La
+ * barra inferior depende del rol, mientras [onBack] conserva la jerarquía cuando existe un padre.
+ */
 @Composable
-private fun TemperatureChart(
-    records: List<TemperatureRecord>
-) {
-    Canvas(
-        Modifier
-            .fillMaxWidth()
-            .height(160.dp)
-    ) {
-
-        if (records.size < 2) {
-            return@Canvas
-        }
-
-        val minY = 16f
-        val maxY = 32f
-
-        val stepX =
-            size.width / (records.size - 1)
-
-        val path = Path()
-
-        records.forEachIndexed { index, record ->
-
-            val x =
-                index * stepX
-
-            val normalized =
-                (
-                        (record.value.toFloat() - minY) /
-                                (maxY - minY)
-                        ).coerceIn(
-                        0f,
-                        1f
-                    )
-
-            val y =
-                size.height -
-                        normalized * size.height
-
-            if (index == 0) {
-                path.moveTo(
-                    x,
-                    y
-                )
-            } else {
-                path.lineTo(
-                    x,
-                    y
-                )
-            }
-        }
-
-        val warningY =
-            size.height -
-                    (
-                            (23f - minY) /
-                                    (maxY - minY)
-                            ) * size.height
-
-        val criticalY =
-            size.height -
-                    (
-                            (27f - minY) /
-                                    (maxY - minY)
-                            ) * size.height
-
-        drawLine(
-            color = Warning,
-            start = Offset(
-                0f,
-                warningY
-            ),
-            end = Offset(
-                size.width,
-                warningY
-            ),
-            strokeWidth = 2f
-        )
-
-        drawLine(
-            color = Critical,
-            start = Offset(
-                0f,
-                criticalY
-            ),
-            end = Offset(
-                size.width,
-                criticalY
-            ),
-            strokeWidth = 2f
-        )
-
-        drawPath(
-            path = path,
-            color = BrandRed,
-            style = Stroke(
-                width = 5f
-            )
-        )
-    }
-}
-@Composable
-fun FlushingTrackScreen(
+fun HistoryScreen(
     viewModel: AppViewModel,
-    onNavigate: (String) -> Unit
+    supervisorMode: Boolean,
+    onNavigate: (String) -> Unit,
+    onBack: (() -> Unit)? = null
 ) {
-    val flushings by viewModel.flushings.collectAsState()
+    val flushingList by viewModel.flushingList.collectAsState()
+    val line = viewModel.selectedLine()
+    val lineFlushings = remember(flushingList, line) {
+        viewModel.flushingsForLine(flushingList.records, line)
+    }
 
     Scaffold(
         topBar = {
-            AppTopBar("Seguimiento de flushing")
+            AppTopBar(
+                "Historial de flushing",
+                "${line.name} · ${viewModel.selectedShed().name}",
+                onBack = onBack
+            )
+        },
+        bottomBar = {
+            if (supervisorMode) {
+                SupervisorBottomBar(Routes.History, onNavigate)
+            } else {
+                OperatorBottomBar(Routes.History, onNavigate)
+            }
+        }
+    ) { inner ->
+        LazyColumn(
+            Modifier
+                .fillMaxSize()
+                .padding(inner)
+                .background(Color.White)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                SectionCard {
+                    Text("Ubicación seleccionada", fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    Text(viewModel.selectedFarm().name, fontSize = 13.sp)
+                    Text(
+                        "${viewModel.selectedShed().name} · ${line.name}",
+                        color = TextSecondary,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+
+            item { LocalRecordsBanner() }
+
+            when (flushingList) {
+                FlushingListUiState.Loading -> item {
+                    Column(
+                        Modifier.fillParentMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator()
+                        Spacer(Modifier.height(12.dp))
+                        Text("Cargando historial de flushing…", color = TextSecondary)
+                    }
+                }
+                FlushingListUiState.Error -> item {
+                    Box(
+                        Modifier.fillParentMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "No se pudo cargar el historial de flushing.",
+                            color = Critical
+                        )
+                    }
+                }
+                is FlushingListUiState.Ready -> {
+                    if (lineFlushings.isEmpty()) {
+                        item {
+                            Box(
+                                Modifier.fillParentMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Sin flushing registrados", color = TextSecondary)
+                            }
+                        }
+                    } else {
+                        items(lineFlushings, key = { it.id }) { flushing ->
+                            FlushingCard(
+                                viewModel = viewModel,
+                                f = flushing,
+                                showRegistrationDetails = true
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Seguimiento supervisor: distingue carga, error, lista vacía y registros disponibles. */
+@Composable
+fun FlushingTrackScreen(
+    viewModel: AppViewModel,
+    onNavigate: (String) -> Unit,
+    onBack: () -> Unit
+) {
+    val flushingList by viewModel.flushingList.collectAsState()
+
+    Scaffold(
+        topBar = {
+            AppTopBar("Seguimiento de flushing", onBack = onBack)
         },
         bottomBar = {
             SupervisorBottomBar(
-                Routes.History,
+                Routes.HomeSupervisor,
                 onNavigate
             )
         }
@@ -911,23 +808,73 @@ fun FlushingTrackScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(flushings.size) {
-                FlushingCard(
-                    viewModel,
-                    flushings[it]
-                )
+            item {
+                LocalRecordsBanner()
+            }
+
+            when (val state = flushingList) {
+                FlushingListUiState.Loading -> item {
+                    Column(
+                        Modifier.fillParentMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator()
+                        Spacer(Modifier.height(12.dp))
+                        Text("Cargando registros de flushing…", color = TextSecondary)
+                    }
+                }
+                FlushingListUiState.Error -> item {
+                    Box(
+                        Modifier.fillParentMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "No se pudieron cargar los registros de flushing.",
+                            color = Critical
+                        )
+                    }
+                }
+                is FlushingListUiState.Ready -> {
+                    if (state.records.isEmpty()) {
+                        item {
+                            Box(
+                                Modifier.fillParentMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "No hay registros de flushing guardados.",
+                                    color = TextSecondary
+                                )
+                            }
+                        }
+                    } else {
+                        items(state.records.size) { index ->
+                            FlushingCard(
+                                viewModel,
+                                state.records[index],
+                                showRegistrationDetails = true
+                            )
+                        }
+                    }
+                }
             }
         }
     }
 }
+/**
+ * Tarjeta reutilizada por dashboard, historial y seguimiento.
+ *
+ * La presentación distingue mediciones manuales antes/después, contexto automático heredado y
+ * registros antiguos sin temperatura. Las referencias inválidas se muestran sin forzar nulls.
+ */
 @Composable
 private fun FlushingCard(
     viewModel: AppViewModel,
-    f: FlushingRecord
+    f: FlushingRecord,
+    showRegistrationDetails: Boolean = false
 ) {
-    val line = viewModel.line(f.lineId)
-    val shed = viewModel.shed(f.shedId)
-    val farm = viewModel.farm(f.farmId)
+    val location = viewModel.resolveFlushingLocation(f)
 
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -972,15 +919,17 @@ private fun FlushingCard(
                     Modifier.weight(1f)
                 ) {
                     Text(
-                        "${line?.name} · ${shed?.name}",
+                        location?.let { "${it.line.name} · ${it.shed.name}" }
+                            ?: "Ubicación no disponible",
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 13.sp
                     )
 
                     Text(
-                        farm?.name.orEmpty(),
+                        location?.farm?.name
+                            ?: "Referencia guardada: granja ${f.farmId} · galpón ${f.shedId} · línea ${f.lineId}",
                         fontSize = 11.sp,
-                        color = TextSecondary
+                        color = if (location == null) Critical else TextSecondary
                     )
                 }
 
@@ -1020,9 +969,124 @@ private fun FlushingCard(
                 fontSize = 12.sp,
                 color = TextSecondary
             )
+
+            if (f.observation.isNotBlank()) {
+                Text(
+                    "Observación: ${f.observation}",
+                    fontSize = 12.sp,
+                    color = TextSecondary
+                )
+            } else if (showRegistrationDetails) {
+                Text(
+                    "Observación: Sin observaciones",
+                    fontSize = 12.sp,
+                    color = TextSecondary
+                )
+            }
+
+            if (showRegistrationDetails) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Temperaturas del flushing",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.height(4.dp))
+                if (f.beforeTemperatureC != null || f.afterTemperatureC != null) {
+                    HistoricalTemperatureRow(
+                        label = "Antes del flushing",
+                        temperature = f.beforeTemperatureC
+                    )
+                    HistoricalTemperatureRow(
+                        label = "Después del flushing",
+                        temperature = f.afterTemperatureC
+                    )
+                } else if (f.temperatureAtRegistrationC != null) {
+                    HistoricalTemperatureRow(
+                        label = "Temperatura contextual automática heredada",
+                        temperature = f.temperatureAtRegistrationC
+                    )
+                    Text(
+                        "Esta lectura demostrativa no modifica el estado efectivo de la línea.",
+                        fontSize = 11.sp,
+                        color = TextSecondary
+                    )
+                } else {
+                    Text(
+                        "Temperatura no capturada en este registro",
+                        fontSize = 12.sp,
+                        color = TextSecondary
+                    )
+                }
+            } else {
+                Spacer(Modifier.height(6.dp))
+                CompactFlushingTemperatureSummary(f)
+            }
+
+            if (showRegistrationDetails && f.photoUri != null) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Fotografía del flushing",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.height(6.dp))
+                FlushingPhoto(
+                    uri = f.photoUri,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(160.dp)
+                )
+            } else if (showRegistrationDetails) {
+                Text(
+                    "Fotografía: No adjuntada",
+                    fontSize = 12.sp,
+                    color = TextSecondary
+                )
+            }
         }
     }
 }
+
+@Composable
+private fun CompactFlushingTemperatureSummary(flushing: FlushingRecord) {
+    val text = when {
+        flushing.beforeTemperatureC != null || flushing.afterTemperatureC != null -> {
+            val before = flushing.beforeTemperatureC?.let {
+                "$it °C · ${flushing.beforeTemperatureStatus?.displayLabel}"
+            } ?: "No capturada"
+            val after = flushing.afterTemperatureC?.let {
+                "$it °C · ${flushing.afterTemperatureStatus?.displayLabel}"
+            } ?: "No capturada"
+            "Antes: $before → Después: $after"
+        }
+        flushing.temperatureAtRegistrationC != null ->
+            "Contexto automático heredado: ${flushing.temperatureAtRegistrationC} °C · " +
+                    flushing.temperatureStatusAtRegistration?.displayLabel
+        else -> "Sin temperatura registrada"
+    }
+
+    Text(
+        text,
+        fontSize = 11.sp,
+        color = TextSecondary
+    )
+}
+
+@Composable
+private fun HistoricalTemperatureRow(label: String, temperature: Double?) {
+    val validTemperature = temperature?.takeIf { it.isFinite() }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            if (validTemperature == null) "$label: No capturada" else "$label: $validTemperature °C",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = if (temperature != null && validTemperature == null) Critical else Color.Unspecified
+        )
+        validTemperature?.let { StatusBadge(temperatureStatusFor(it)) }
+    }
+}
+/** Alertas demo globales; la acción de detalle solo existe para una ubicación completa válida. */
 @Composable
 fun AlertsSupervisorScreen(
     viewModel: AppViewModel,
@@ -1032,7 +1096,7 @@ fun AlertsSupervisorScreen(
 
     Scaffold(
         topBar = {
-            AppTopBar("Alertas")
+            AppTopBar("Alertas demostrativas")
         },
         bottomBar = {
             SupervisorBottomBar(
@@ -1049,7 +1113,7 @@ fun AlertsSupervisorScreen(
                 .background(Color.White)
         ) {
 
-            OfflineBanner(offline)
+            LocalDataBanner(offline, viewModel.lines.firstOrNull()?.measurementDate)
 
             LazyColumn(
                 Modifier
@@ -1062,17 +1126,8 @@ fun AlertsSupervisorScreen(
 
                     val alert = viewModel.alerts[i]
 
-                    val line =
-                        viewModel.line(alert.lineId)!!
-
-                    val shed =
-                        viewModel.shed(alert.shedId)!!
-
-                    val farm =
-                        viewModel.farm(alert.farmId)!!
-
-                    val (color, bg) =
-                        statusColors(alert.status)
+                    val location = viewModel.resolveAlertLocation(alert)
+                    val (color, bg) = statusColors(alert.status)
 
                     Card(
                         colors = CardDefaults.cardColors(
@@ -1084,7 +1139,6 @@ fun AlertsSupervisorScreen(
                         ),
                         shape = RoundedCornerShape(16.dp)
                     ) {
-
                         Column(
                             Modifier.padding(14.dp)
                         ) {
@@ -1096,15 +1150,17 @@ fun AlertsSupervisorScreen(
                                 ) {
 
                                     Text(
-                                        "${line.name} · ${shed.name}",
+                                        location?.let { "${it.line.name} · ${it.shed.name}" }
+                                            ?: "Ubicación no disponible",
                                         color = color,
                                         fontWeight = FontWeight.SemiBold
                                     )
 
                                     Text(
-                                        "${farm.name} · ${alert.date} ${alert.time}",
+                                        location?.let { "${it.farm.name} · ${demoAlertTimestamp(alert.date, alert.time)}" }
+                                            ?: "Referencia: granja ${alert.farmId} · galpón ${alert.shedId} · línea ${alert.lineId}",
                                         fontSize = 11.sp,
-                                        color = TextSecondary
+                                        color = if (location == null) Critical else TextSecondary
                                     )
                                 }
 
@@ -1116,31 +1172,19 @@ fun AlertsSupervisorScreen(
                                 )
                             }
 
-                            Spacer(
-                                Modifier.height(8.dp)
-                            )
+                            if (location != null) {
+                                Spacer(Modifier.height(8.dp))
 
-                            OutlinedButton(
-                                onClick = {
-                                    viewModel.selectFarm(
-                                        alert.farmId
-                                    )
-
-                                    viewModel.selectShed(
-                                        alert.shedId
-                                    )
-
-                                    viewModel.selectLine(
-                                        alert.lineId
-                                    )
-
-                                    onNavigate(
-                                        Routes.LineDetail
-                                    )
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("Ver detalle")
+                                OutlinedButton(
+                                    onClick = {
+                                        if (viewModel.selectAlertLocation(alert)) {
+                                            onNavigate(Routes.LineDetail)
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Ver detalle")
+                                }
                             }
                         }
                     }
