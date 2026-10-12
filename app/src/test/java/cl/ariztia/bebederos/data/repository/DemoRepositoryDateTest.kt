@@ -1,4 +1,4 @@
-package com.example.bebederosapp.agrobebederos.data.repository
+package cl.ariztia.bebederos.data.repository
 
 import org.junit.Test
 import kotlin.test.assertEquals

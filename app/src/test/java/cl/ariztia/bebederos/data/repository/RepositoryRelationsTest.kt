@@ -1,4 +1,4 @@
-package com.example.bebederosapp.agrobebederos.data.repository
+package cl.ariztia.bebederos.data.repository
 
 import cl.ariztia.bebederos.data.model.FlushingRecord
 import org.junit.Test

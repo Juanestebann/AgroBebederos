@@ -1,4 +1,4 @@
-package com.example.bebederosapp.agrobebederos.ui.components
+package cl.ariztia.bebederos.ui.components
 
 import cl.ariztia.bebederos.ui.components.compactDataOriginDescription
 import cl.ariztia.bebederos.ui.components.demoAlertTimestamp

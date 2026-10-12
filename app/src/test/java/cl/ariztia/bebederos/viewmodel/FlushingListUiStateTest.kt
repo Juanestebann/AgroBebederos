@@ -1,4 +1,4 @@
-package com.example.bebederosapp.agrobebederos.viewmodel
+package cl.ariztia.bebederos.viewmodel
 
 import cl.ariztia.bebederos.data.model.FlushingRecord
 import org.junit.Test

@@ -1,4 +1,4 @@
-package com.example.bebederosapp.agrobebederos.data.model
+package cl.ariztia.bebederos.data.model
 
 import cl.ariztia.bebederos.data.model.CRITICAL_TEMPERATURE_C
 import cl.ariztia.bebederos.data.model.TemperatureStatus

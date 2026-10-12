@@ -1,5 +1,6 @@
-package com.example.bebederosapp.agrobebederos
-
+package cl.ariztia.bebederos
+import cl.ariztia.bebederos.data.local.AppDatabase
+import cl.ariztia.bebederos.data.local.FlushingEntity
 import android.content.Context
 import androidx.room.Room
 import androidx.room.testing.MigrationTestHelper
