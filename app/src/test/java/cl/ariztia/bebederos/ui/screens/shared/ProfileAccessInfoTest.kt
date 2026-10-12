@@ -1,4 +1,4 @@
-package com.example.bebederosapp.agrobebederos.ui.screens.shared
+package cl.ariztia.bebederos.ui.screens.shared
 
 import cl.ariztia.bebederos.data.model.DemoUser
 import cl.ariztia.bebederos.data.model.UserRole

@@ -1,4 +1,4 @@
-package com.example.bebederosapp.agrobebederos.data.local
+package cl.ariztia.bebederos.data.local
 
 import cl.ariztia.bebederos.data.model.FlushingRecord
 import org.junit.Test
