@@ -8,6 +8,7 @@ object Routes {
     const val Lines = "lines"
     const val LineDetail = "line_detail"
     const val Flushing = "flushing"
+    const val FlushingEdit = "flushing_edit"
     const val FlushingOk = "flushing_ok"
     const val AlertsOperario = "alerts_operario"
     const val ProfileOperario = "profile_operario"

@@ -93,6 +93,57 @@ class EffectiveLineTemperatureTest {
         assertEquals(TemperatureSource.DEMO, line.temperatureSource)
     }
 
+    @Test
+    fun editingEffectiveAfterTemperatureImmediatelyChangesTheEffectiveLine() {
+        val previous = flushing(30, "10/10/2026", "10:00", 24.0)
+        val effective = flushing(31, "10/10/2026", "11:00", 21.0)
+        val edited = effective.copy(
+            reason = "Motivo editado",
+            observation = "Observación editada",
+            beforeTemperatureC = 30.0,
+            afterTemperatureC = 28.0
+        )
+
+        val line = effectiveWaterLines(repository.lines, listOf(previous, edited))
+            .first { it.id == 3 }
+
+        assertEquals(28.0, line.temperature)
+        assertEquals(TemperatureStatus.CRITICAL, line.status)
+        assertEquals("10/10/2026", line.measurementDate)
+        assertEquals("11:00", line.updatedAt)
+    }
+
+    @Test
+    fun editingNonEffectiveOrNonThermalFieldsDoesNotChangeEffectiveTemperature() {
+        val older = flushing(40, "10/10/2026", "10:00", 25.0)
+            .copy(reason = "Editado", observation = "Editada", photoUri = "content://foto")
+        val effective = flushing(41, "10/10/2026", "11:00", 21.0)
+            .copy(reason = "Editado", observation = "Editada", photoUri = "content://foto-2")
+
+        val line = effectiveWaterLines(repository.lines, listOf(older, effective))
+            .first { it.id == 3 }
+
+        assertEquals(21.0, line.temperature)
+        assertEquals(TemperatureStatus.NORMAL, line.status)
+    }
+
+    @Test
+    fun deletingEffectiveRecordFallsBackToPreviousAndThenToDemo() {
+        val previous = flushing(50, "10/10/2026", "10:00", 24.0)
+        val effective = flushing(51, "10/10/2026", "11:00", 21.0)
+
+        val afterDeletingEffective = effectiveWaterLines(repository.lines, listOf(previous))
+            .first { it.id == 3 }
+        val afterDeletingLastValid = effectiveWaterLines(repository.lines, emptyList())
+            .first { it.id == 3 }
+
+        assertEquals(24.0, afterDeletingEffective.temperature)
+        assertEquals(TemperatureSource.MANUAL_AFTER_FLUSHING, afterDeletingEffective.temperatureSource)
+        assertEquals(28.9, afterDeletingLastValid.temperature)
+        assertEquals(TemperatureSource.DEMO, afterDeletingLastValid.temperatureSource)
+        assertEquals(TemperatureStatus.CRITICAL, afterDeletingLastValid.status)
+    }
+
     private fun flushing(
         id: Long,
         date: String,

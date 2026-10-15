@@ -424,24 +424,62 @@ private fun deletePhoto(path: String?) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FlushingScreen(viewModel: AppViewModel, onBack: () -> Unit, onSuccess: () -> Unit) {
+fun FlushingScreen(
+    viewModel: AppViewModel,
+    editMode: Boolean,
+    onBack: () -> Unit,
+    onSuccess: () -> Unit
+) {
     val context = LocalContext.current
     val user by viewModel.currentUser.collectAsState()
     val effectiveLines by viewModel.effectiveLines.collectAsState()
-    val line = viewModel.selectedLine(); val shed = viewModel.selectedShed(); val farm = viewModel.selectedFarm()
+    val editingRecord by viewModel.editingFlushing.collectAsState()
     val saveState by viewModel.flushingSave.collectAsState()
-    var reason by rememberSaveable { mutableStateOf("") }
-    var observation by rememberSaveable { mutableStateOf("") }
-    var beforeTemperature by rememberSaveable { mutableStateOf("") }
-    var afterTemperature by rememberSaveable { mutableStateOf("") }
+    val editLocation = editingRecord?.let(viewModel::resolveFlushingLocation)
+
+    if (editMode && (editingRecord == null || editLocation == null)) {
+        Scaffold(topBar = { AppTopBar("Editar flushing", onBack = onBack) }) { inner ->
+            Box(
+                Modifier.fillMaxSize().padding(inner).padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "No se encontró un flushing autorizado para editar. Vuelve al historial.",
+                    color = Critical,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+        return
+    }
+
+    val line = if (editMode) {
+        viewModel.line(editingRecord!!.lineId) ?: editLocation!!.line
+    } else {
+        viewModel.selectedLine()
+    }
+    val shed = if (editMode) editLocation!!.shed else viewModel.selectedShed()
+    val farm = if (editMode) editLocation!!.farm else viewModel.selectedFarm()
+    val formKey = if (editMode) "edit-${editingRecord!!.id}" else "create-${line.id}"
+    var reason by rememberSaveable(formKey) { mutableStateOf(editingRecord?.reason.orEmpty()) }
+    var observation by rememberSaveable(formKey) {
+        mutableStateOf(editingRecord?.observation.orEmpty())
+    }
+    var beforeTemperature by rememberSaveable(formKey) {
+        mutableStateOf(editingRecord?.beforeTemperatureC?.toString().orEmpty())
+    }
+    var afterTemperature by rememberSaveable(formKey) {
+        mutableStateOf(editingRecord?.afterTemperatureC?.toString().orEmpty())
+    }
     var expanded by remember { mutableStateOf(false) }
-    var photoUri by rememberSaveable { mutableStateOf<String?>(null) }
-    var photoPath by rememberSaveable { mutableStateOf<String?>(null) }
-    var pendingUri by rememberSaveable { mutableStateOf<String?>(null) }
-    var pendingPath by rememberSaveable { mutableStateOf<String?>(null) }
-    var cameraMessage by rememberSaveable { mutableStateOf<String?>(null) }
-    var cameraMessageIsError by rememberSaveable { mutableStateOf(false) }
+    var photoUri by rememberSaveable(formKey) { mutableStateOf(editingRecord?.photoUri) }
+    var photoPath by rememberSaveable(formKey) { mutableStateOf<String?>(null) }
+    var pendingUri by rememberSaveable(formKey) { mutableStateOf<String?>(null) }
+    var pendingPath by rememberSaveable(formKey) { mutableStateOf<String?>(null) }
+    var cameraMessage by rememberSaveable(formKey) { mutableStateOf<String?>(null) }
+    var cameraMessageIsError by rememberSaveable(formKey) { mutableStateOf(false) }
     val savedRecordId = saveState.savedRecordId
+    val updatedRecordId = saveState.updatedRecordId
     // El callback recibe el resultado de otra actividad y conserva solo fotografías no vacías.
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         val capturedPath = pendingPath
@@ -507,6 +545,7 @@ fun FlushingScreen(viewModel: AppViewModel, onBack: () -> Unit, onSuccess: () ->
         pendingUri = null
         photoPath = null
         photoUri = null
+        if (editMode) viewModel.cancelFlushingEdit()
         onBack()
     }
     // produceState crea una vista previa reactiva; la hora definitiva se toma al construir el registro.
@@ -518,6 +557,7 @@ fun FlushingScreen(viewModel: AppViewModel, onBack: () -> Unit, onSuccess: () ->
     }
     LaunchedEffect(photoPath, photoUri) {
         if (
+            photoPath != null &&
             photoUri != null &&
             photoPath?.let { File(it).isFile && File(it).length() > 0 } != true
         ) {
@@ -529,7 +569,7 @@ fun FlushingScreen(viewModel: AppViewModel, onBack: () -> Unit, onSuccess: () ->
     }
     // Este efecto se ejecuta al recibir el ID de Room y evita navegar antes de confirmar el guardado.
     LaunchedEffect(savedRecordId) {
-        savedRecordId?.let { recordId ->
+        if (!editMode) savedRecordId?.let { recordId ->
             // El archivo ya pertenece al registro guardado y no debe eliminarse al salir.
             photoPath = null
             photoUri = null
@@ -539,16 +579,27 @@ fun FlushingScreen(viewModel: AppViewModel, onBack: () -> Unit, onSuccess: () ->
             viewModel.consumeFlushingSuccess(recordId)
         }
     }
+    LaunchedEffect(updatedRecordId) {
+        if (editMode) updatedRecordId?.let { recordId ->
+            // La nueva fotografía, si existe, ya quedó asociada al registro actualizado.
+            photoPath = null
+            photoUri = null
+            onSuccess()
+            viewModel.consumeFlushingUpdateSuccess(recordId)
+        }
+    }
     // Atrás se bloquea durante la escritura para no interrumpir el resultado ni duplicar reintentos.
     BackHandler {
-        if (!saveState.isSaving && savedRecordId == null) leaveForm()
+        if (!saveState.isSaving && savedRecordId == null && updatedRecordId == null) leaveForm()
     }
 
     Scaffold(topBar = {
         AppTopBar(
-            "Registrar Flushing",
+            if (editMode) "Editar flushing" else "Registrar Flushing",
             onBack = {
-                if (!saveState.isSaving && savedRecordId == null) leaveForm()
+                if (!saveState.isSaving && savedRecordId == null && updatedRecordId == null) {
+                    leaveForm()
+                }
             }
         )
     }) { inner ->
@@ -557,9 +608,12 @@ fun FlushingScreen(viewModel: AppViewModel, onBack: () -> Unit, onSuccess: () ->
                 "Granja" to farm.name,
                 "Galpón" to shed.name,
                 "Línea" to line.name,
-                "Responsable automático" to (user?.name ?: "Sesión no disponible"),
-                "Fecha (vista previa)" to timestampPreview.date,
-                "Hora (vista previa)" to timestampPreview.time
+                (if (editMode) "Responsable original" else "Responsable automático") to
+                        (editingRecord?.operatorName ?: user?.name ?: "Sesión no disponible"),
+                (if (editMode) "Fecha original" else "Fecha (vista previa)") to
+                        (editingRecord?.date ?: timestampPreview.date),
+                (if (editMode) "Hora original" else "Hora (vista previa)") to
+                        (editingRecord?.time ?: timestampPreview.time)
             ).forEach { (label, value) ->
                 Text(label, fontSize = 12.sp, color = TextSecondary)
                 Text(value, modifier = Modifier.fillMaxWidth().background(BrandRedLight, RoundedCornerShape(12.dp)).padding(12.dp), color = BrandRed, fontWeight = FontWeight.Medium, fontSize = 13.sp)
@@ -731,14 +785,24 @@ fun FlushingScreen(viewModel: AppViewModel, onBack: () -> Unit, onSuccess: () ->
                 }
             }
             Button(onClick = {
-                viewModel.registerFlushing(
-                    reason,
-                    observation,
-                    photoUri,
-                    beforeTemperature,
-                    afterTemperature
-                )
-            }, enabled = !saveState.isSaving && savedRecordId == null, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                if (editMode) {
+                    viewModel.updateFlushing(
+                        reason,
+                        observation,
+                        photoUri,
+                        beforeTemperature,
+                        afterTemperature
+                    )
+                } else {
+                    viewModel.registerFlushing(
+                        reason,
+                        observation,
+                        photoUri,
+                        beforeTemperature,
+                        afterTemperature
+                    )
+                }
+            }, enabled = !saveState.isSaving && savedRecordId == null && updatedRecordId == null, modifier = Modifier.fillMaxWidth().height(52.dp)) {
                 if (saveState.isSaving) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(20.dp),
@@ -748,7 +812,22 @@ fun FlushingScreen(viewModel: AppViewModel, onBack: () -> Unit, onSuccess: () ->
                     Spacer(Modifier.width(8.dp))
                     Text("Guardando...")
                 } else {
-                    Text(if (saveState.errorMessage == null) "Registrar flushing" else "Reintentar")
+                    Text(
+                        when {
+                            saveState.errorMessage != null -> "Reintentar"
+                            editMode -> "Guardar cambios"
+                            else -> "Registrar flushing"
+                        }
+                    )
+                }
+            }
+            if (editMode) {
+                OutlinedButton(
+                    onClick = ::leaveForm,
+                    enabled = !saveState.isSaving && updatedRecordId == null,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Cancelar")
                 }
             }
         }

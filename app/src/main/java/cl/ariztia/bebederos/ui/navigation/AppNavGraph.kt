@@ -75,6 +75,7 @@ fun AppNavGraph(
             Routes.LineDetail,
             Routes.History,
             Routes.Flushing,
+            Routes.FlushingEdit,
             Routes.FlushingOk,
             Routes.AlertsOperario,
             Routes.ProfileOperario
@@ -190,6 +191,7 @@ fun AppNavGraph(
             composable(Routes.Flushing) {
                 FlushingScreen(
                     viewModel,
+                    editMode = false,
                     onBack = {
                         navController.popBackStack()
                     },
@@ -200,6 +202,19 @@ fun AppNavGraph(
                             }
                             launchSingleTop = true
                         }
+                    }
+                )
+            }
+
+            composable(Routes.FlushingEdit) {
+                FlushingScreen(
+                    viewModel,
+                    editMode = true,
+                    onBack = {
+                        navController.popBackStack()
+                    },
+                    onSuccess = {
+                        navController.popBackStack()
                     }
                 )
             }

@@ -688,9 +688,20 @@ fun HistoryScreen(
     onBack: (() -> Unit)? = null
 ) {
     val flushingList by viewModel.flushingList.collectAsState()
+    val deleteState by viewModel.flushingDelete.collectAsState()
     val line = viewModel.selectedLine()
+    val snackbarHostState = remember { SnackbarHostState() }
+    var pendingDeletionId by remember { mutableStateOf<Long?>(null) }
     val lineFlushings = remember(flushingList, line) {
         viewModel.flushingsForLine(flushingList.records, line)
+    }
+
+    LaunchedEffect(deleteState.deletedRecordId) {
+        deleteState.deletedRecordId?.let { deletedId ->
+            pendingDeletionId = null
+            viewModel.consumeFlushingDeleteSuccess(deletedId)
+            snackbarHostState.showSnackbar("Flushing eliminado correctamente.")
+        }
     }
 
     Scaffold(
@@ -707,7 +718,8 @@ fun HistoryScreen(
             } else {
                 OperatorBottomBar(Routes.History, onNavigate)
             }
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { inner ->
         LazyColumn(
             Modifier
@@ -767,14 +779,99 @@ fun HistoryScreen(
                         }
                     } else {
                         items(lineFlushings, key = { it.id }) { flushing ->
+                            val canManage = !supervisorMode &&
+                                    viewModel.canCurrentUserManageFlushing(flushing)
                             FlushingCard(
                                 viewModel = viewModel,
                                 f = flushing,
-                                showRegistrationDetails = true
+                                showRegistrationDetails = true,
+                                onEdit = if (canManage) {
+                                    {
+                                        if (viewModel.prepareFlushingEdit(flushing.id)) {
+                                            onNavigate(Routes.FlushingEdit)
+                                        }
+                                    }
+                                } else {
+                                    null
+                                },
+                                onDelete = if (canManage) {
+                                    {
+                                        viewModel.clearFlushingDeleteState()
+                                        pendingDeletionId = flushing.id
+                                    }
+                                } else {
+                                    null
+                                }
                             )
                         }
                     }
                 }
+            }
+        }
+    }
+
+    pendingDeletionId?.let { recordId ->
+        val record = flushingList.records.firstOrNull { it.id == recordId }
+        if (record != null) {
+            val isDeleting = deleteState.deletingRecordId == recordId
+            AlertDialog(
+                onDismissRequest = {
+                    if (!isDeleting) {
+                        pendingDeletionId = null
+                        viewModel.clearFlushingDeleteState()
+                    }
+                },
+                icon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                title = { Text("Eliminar flushing") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "Se eliminará permanentemente el registro del ${record.date} a las ${record.time}."
+                        )
+                        Text("Motivo: ${record.reason}")
+                        Text(
+                            "La eliminación puede cambiar la temperatura efectiva mostrada para esta línea.",
+                            color = TextSecondary
+                        )
+                        deleteState.errorMessage?.let {
+                            Text(it, color = Critical, fontSize = 12.sp)
+                        }
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            pendingDeletionId = null
+                            viewModel.clearFlushingDeleteState()
+                        },
+                        enabled = !isDeleting
+                    ) {
+                        Text("Cancelar")
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { viewModel.deleteFlushing(recordId) },
+                        enabled = !isDeleting,
+                        colors = ButtonDefaults.buttonColors(containerColor = Critical)
+                    ) {
+                        if (isDeleting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text("Eliminar")
+                        }
+                    }
+                }
+            )
+        } else if (deleteState.deletedRecordId == null && !deleteState.isDeleting) {
+            LaunchedEffect(recordId) {
+                pendingDeletionId = null
+                viewModel.clearFlushingDeleteState()
+                snackbarHostState.showSnackbar("El flushing ya no está disponible.")
             }
         }
     }
@@ -849,10 +946,10 @@ fun FlushingTrackScreen(
                             }
                         }
                     } else {
-                        items(state.records.size) { index ->
+                        items(state.records, key = { it.id }) { flushing ->
                             FlushingCard(
                                 viewModel,
-                                state.records[index],
+                                flushing,
                                 showRegistrationDetails = true
                             )
                         }
@@ -872,7 +969,9 @@ fun FlushingTrackScreen(
 private fun FlushingCard(
     viewModel: AppViewModel,
     f: FlushingRecord,
-    showRegistrationDetails: Boolean = false
+    showRegistrationDetails: Boolean = false,
+    onEdit: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null
 ) {
     val location = viewModel.resolveFlushingLocation(f)
 
@@ -1043,6 +1142,29 @@ private fun FlushingCard(
                     fontSize = 12.sp,
                     color = TextSecondary
                 )
+            }
+
+            if (onEdit != null || onDelete != null) {
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    onEdit?.let {
+                        OutlinedButton(onClick = it, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.Edit, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Editar")
+                        }
+                    }
+                    onDelete?.let {
+                        OutlinedButton(onClick = it, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.Delete, contentDescription = null, tint = Critical)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Eliminar", color = Critical)
+                        }
+                    }
+                }
             }
         }
     }

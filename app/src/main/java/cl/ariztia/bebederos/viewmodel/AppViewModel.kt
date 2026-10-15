@@ -1,6 +1,7 @@
 package cl.ariztia.bebederos.viewmodel
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.room.Room
@@ -13,8 +14,13 @@ import cl.ariztia.bebederos.data.repository.DemoRepository
 import cl.ariztia.bebederos.data.repository.ResolvedLocation
 import cl.ariztia.bebederos.data.repository.effectiveWaterLines
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import java.net.URI
 
 /** Estado temporal de campos y errores de la pantalla de inicio de sesión. */
 data class LoginUiState(
@@ -37,8 +43,19 @@ data class FlushingSaveUiState(
     val observationError: String? = null,
     val beforeTemperatureError: String? = null,
     val afterTemperatureError: String? = null,
-    val savedRecordId: Long? = null
+    val savedRecordId: Long? = null,
+    val updatedRecordId: Long? = null
 )
+
+/** Estado de una eliminación confirmada desde el historial del operario. */
+data class FlushingDeleteUiState(
+    val deletingRecordId: Long? = null,
+    val deletedRecordId: Long? = null,
+    val errorMessage: String? = null
+) {
+    val isDeleting: Boolean
+        get() = deletingRecordId != null
+}
 
 /** Diferencia explícitamente la carga inicial, una lista disponible y un fallo de Room. */
 sealed interface FlushingListUiState {
@@ -56,7 +73,7 @@ val FlushingListUiState.records: List<FlushingRecord>
     get() = (this as? FlushingListUiState.Ready)?.records.orEmpty()
 
 /** Resultado interno que agrupa todas las validaciones del formulario. */
-private data class FlushingFormValidation(
+internal data class FlushingFormValidation(
     val reasonError: String? = null,
     val observationError: String? = null,
     val beforeTemperature: WaterTemperatureInput = WaterTemperatureInput(),
@@ -68,7 +85,7 @@ private data class FlushingFormValidation(
 }
 
 /** Valida textos y ambas mediciones antes de permitir cualquier escritura persistente. */
-private fun validateFlushingForm(
+internal fun validateFlushingForm(
     reason: String,
     observation: String,
     beforeTemperatureInput: String,
@@ -90,7 +107,7 @@ private fun validateFlushingForm(
 )
 
 const val MAX_FLUSHING_OBSERVATION_LENGTH = 500
-private const val MAX_FLUSHING_REASON_LENGTH = 80
+internal const val MAX_FLUSHING_REASON_LENGTH = 80
 private const val MAX_LOGIN_EMAIL_LENGTH = 254
 private const val MAX_LOGIN_PASSWORD_LENGTH = 128
 private val LOGIN_EMAIL_PATTERN = Regex("^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+$")
@@ -222,6 +239,61 @@ internal fun createFlushingRecord(
 )
 
 /**
+ * Autoriza mutaciones con la identidad local disponible en el prototipo.
+ *
+ * La coincidencia por nombre no sustituye un identificador de autor estable en producción, pero
+ * conserva el modelo existente sin inventar una identidad ni ampliar el esquema Room.
+ */
+internal fun canManageFlushing(
+    user: DemoUser?,
+    record: FlushingRecord,
+    repository: DemoRepository
+): Boolean {
+    if (user?.role != UserRole.OPERARIO) return false
+    val assignedFarm = repository.farms.firstOrNull {
+        it.name.equals(user.farm.trim(), ignoreCase = true)
+    } ?: return false
+
+    return record.farmId == assignedFarm.id &&
+            record.operatorName == user.name &&
+            repository.resolveLocation(record) != null
+}
+
+/** Conserva toda la trazabilidad y aplica únicamente los campos expresamente editables. */
+internal fun FlushingRecord.withEditableFields(
+    reason: String,
+    observation: String,
+    photoUri: String?,
+    beforeTemperatureC: Double,
+    afterTemperatureC: Double
+): FlushingRecord = copy(
+    reason = reason.trim(),
+    observation = observation.trim(),
+    photoUri = photoUri,
+    beforeTemperatureC = beforeTemperatureC,
+    afterTemperatureC = afterTemperatureC
+)
+
+/** Una base ya existente no se vuelve a poblar aunque su tabla haya sido vaciada intencionalmente. */
+internal fun shouldSeedDemoFlushings(
+    seedAlreadyCompleted: Boolean,
+    databasePreviouslyExisted: Boolean,
+    storedRowCount: Int
+): Boolean = !seedAlreadyCompleted && !databasePreviouslyExisted && storedRowCount == 0
+
+/** Acepta exclusivamente URIs del directorio privado expuesto por el FileProvider de esta app. */
+internal fun isOwnedFlushingPhotoUri(uriValue: String, packageName: String): Boolean {
+    val uri = runCatching { URI(uriValue) }.getOrNull() ?: return false
+    val firstPathSegment = uri.path
+        ?.split('/')
+        ?.firstOrNull { it.isNotBlank() }
+
+    return uri.scheme == "content" &&
+            uri.authority == "$packageName.fileprovider" &&
+            firstPathSegment == "flushing_images"
+}
+
+/**
  * Coordina sesión, selección jerárquica, preferencias y persistencia para las pantallas Compose.
  *
  * Expone [StateFlow] inmutables: la UI los observa con `collectAsState()` y se recompone cuando
@@ -232,7 +304,8 @@ internal fun createFlushingRecord(
 class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = DemoRepository()
     private val settingsStore = SettingsStore(application)
-    private val database = Room.databaseBuilder(application, AppDatabase::class.java, "bebederos.db")
+    private val databasePreviouslyExisted = application.getDatabasePath(DATABASE_NAME).exists()
+    private val database = Room.databaseBuilder(application, AppDatabase::class.java, DATABASE_NAME)
         .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
         .build()
     private val flushingDao = database.flushingDao()
@@ -257,6 +330,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _flushingSave = MutableStateFlow(FlushingSaveUiState())
     val flushingSave = _flushingSave.asStateFlow()
+
+    private val _editingFlushing = MutableStateFlow<FlushingRecord?>(null)
+    val editingFlushing = _editingFlushing.asStateFlow()
+
+    private val _flushingDelete = MutableStateFlow(FlushingDeleteUiState())
+    val flushingDelete = _flushingDelete.asStateFlow()
 
     // stateIn convierte los Flow de DataStore en estado con un valor inicial apto para Compose.
     val offline = settingsStore.offline.stateIn(
@@ -297,15 +376,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             repository.lines
         )
 
-    init {
-        // El sembrado ocurre una sola vez: nunca reemplaza una tabla que ya contiene registros.
-        viewModelScope.launch {
-            if (flushingDao.count() == 0) {
-                repository.initialFlushings.forEach {
-                    flushingDao.insert(it.toEntity())
-                }
-            }
-        }
+    private val demoSeedingJob = viewModelScope.launch {
+        seedDemoFlushingsIfNeeded()
     }
 
     fun updateEmail(value: String) {
@@ -400,6 +472,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         selectionState.reset()
         flushingSubmissionGate.unlock()
         _flushingSave.value = FlushingSaveUiState()
+        _editingFlushing.value = null
+        _flushingDelete.value = FlushingDeleteUiState()
     }
 
     fun setOffline(value: Boolean) =
@@ -502,6 +576,27 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun prepareFlushingRegistration() {
         flushingSubmissionGate.unlock()
         _flushingSave.value = FlushingSaveUiState()
+        _editingFlushing.value = null
+        _flushingDelete.value = FlushingDeleteUiState()
+    }
+
+    /** Conserva un ID estable para edición; la versión persistida se vuelve a leer al guardar. */
+    fun prepareFlushingEdit(recordId: Long): Boolean {
+        val record = flushingList.value.records.firstOrNull { it.id == recordId } ?: return false
+        if (!canManageFlushing(_currentUser.value, record, repository)) return false
+
+        flushingSubmissionGate.unlock()
+        _flushingSave.value = FlushingSaveUiState()
+        _flushingDelete.value = FlushingDeleteUiState()
+        _editingFlushing.value = record
+        return true
+    }
+
+    fun cancelFlushingEdit() {
+        if (_flushingSave.value.isSaving) return
+        _editingFlushing.value = null
+        _flushingSave.value = FlushingSaveUiState()
+        flushingSubmissionGate.unlock()
     }
 
     fun clearFlushingValidationErrors() {
@@ -520,7 +615,34 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _flushingSave.update {
             if (it.savedRecordId == recordId) FlushingSaveUiState() else it
         }
+        flushingSubmissionGate.unlock()
     }
+
+    fun consumeFlushingUpdateSuccess(recordId: Long) {
+        _flushingSave.update {
+            if (it.updatedRecordId == recordId) FlushingSaveUiState() else it
+        }
+        if (_editingFlushing.value?.id == recordId) _editingFlushing.value = null
+        flushingSubmissionGate.unlock()
+    }
+
+    fun clearFlushingDeleteState() {
+        if (!_flushingDelete.value.isDeleting) {
+            _flushingDelete.value = FlushingDeleteUiState()
+            flushingSubmissionGate.unlock()
+        }
+    }
+
+    fun consumeFlushingDeleteSuccess(recordId: Long) {
+        if (_flushingDelete.value.deletedRecordId == recordId) {
+            _flushingDelete.value = FlushingDeleteUiState()
+        }
+        flushingSubmissionGate.unlock()
+    }
+
+    /** Solo orienta la presentación; update/delete repiten esta validación con la fila de Room. */
+    fun canCurrentUserManageFlushing(record: FlushingRecord): Boolean =
+        canManageFlushing(_currentUser.value, record, repository)
 
     /**
      * Valida y guarda un flushing sin admitir envíos simultáneos.
@@ -590,6 +712,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
         // La inserción suspendida no bloquea el hilo principal de Compose.
         viewModelScope.launch {
+            demoSeedingJob.join()
+            if (registrationSession != sessionGeneration) return@launch
+
             val insertedId = try {
                 flushingDao.insert(record.toEntity())
             } catch (error: CancellationException) {
@@ -618,5 +743,253 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 savedRecordId = insertedId
             )
         }
+    }
+
+    /**
+     * Actualiza únicamente campos editables después de recuperar y autorizar la fila de Room.
+     */
+    fun updateFlushing(
+        reason: String,
+        observation: String,
+        photoUri: String?,
+        beforeTemperatureInput: String,
+        afterTemperatureInput: String
+    ) {
+        val validation = validateFlushingForm(
+            reason,
+            observation,
+            beforeTemperatureInput,
+            afterTemperatureInput
+        )
+        if (!validation.isValid) {
+            _flushingSave.value = FlushingSaveUiState(
+                reasonError = validation.reasonError,
+                observationError = validation.observationError,
+                beforeTemperatureError = validation.beforeTemperature.error,
+                afterTemperatureError = validation.afterTemperature.error
+            )
+            return
+        }
+
+        val editingId = _editingFlushing.value?.id
+        if (editingId == null || editingId <= 0) {
+            _flushingSave.value = FlushingSaveUiState(
+                errorMessage = "No se encontró el flushing que deseas editar. Vuelve al historial e inténtalo nuevamente."
+            )
+            return
+        }
+
+        if (!flushingSubmissionGate.tryLock()) return
+        val mutationSession = sessionGeneration
+        _flushingSave.value = FlushingSaveUiState(isSaving = true)
+
+        viewModelScope.launch {
+            demoSeedingJob.join()
+            if (mutationSession != sessionGeneration) return@launch
+
+            val persisted = try {
+                flushingDao.findById(editingId)?.toModel()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                failFlushingWrite(
+                    mutationSession,
+                    "No se pudo recuperar el flushing guardado. Inténtalo nuevamente."
+                )
+                return@launch
+            }
+
+            if (persisted == null) {
+                failFlushingWrite(
+                    mutationSession,
+                    "El flushing ya no existe o fue eliminado. Vuelve al historial."
+                )
+                return@launch
+            }
+
+            val activeUser = _currentUser.value
+            if (!canManageFlushing(activeUser, persisted, repository)) {
+                failFlushingWrite(
+                    mutationSession,
+                    "No tienes autorización para modificar este flushing."
+                )
+                return@launch
+            }
+
+            val updated = persisted.withEditableFields(
+                reason = reason,
+                observation = observation,
+                photoUri = photoUri,
+                beforeTemperatureC = validation.beforeTemperature.value!!,
+                afterTemperatureC = validation.afterTemperature.value!!
+            )
+
+            val affectedRows = try {
+                flushingDao.update(updated.toEntity())
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                failFlushingWrite(
+                    mutationSession,
+                    "No se pudieron guardar los cambios. Revisa el almacenamiento e inténtalo nuevamente."
+                )
+                return@launch
+            }
+
+            if (affectedRows != 1) {
+                failFlushingWrite(
+                    mutationSession,
+                    "No se pudo confirmar la actualización del flushing. Inténtalo nuevamente."
+                )
+                return@launch
+            }
+
+            if (persisted.photoUri != updated.photoUri) {
+                removeOwnedPhotoIfUnreferenced(persisted.photoUri)
+            }
+            if (mutationSession != sessionGeneration) return@launch
+
+            _editingFlushing.value = updated
+            _flushingSave.value = FlushingSaveUiState(updatedRecordId = updated.id)
+        }
+    }
+
+    /** Elimina una fila autorizada y solo después intenta limpiar su evidencia privada. */
+    fun deleteFlushing(recordId: Long) {
+        if (recordId <= 0) {
+            _flushingDelete.value = FlushingDeleteUiState(
+                errorMessage = "No se pudo identificar el flushing que deseas eliminar."
+            )
+            return
+        }
+        if (!flushingSubmissionGate.tryLock()) return
+
+        val mutationSession = sessionGeneration
+        _flushingDelete.value = FlushingDeleteUiState(deletingRecordId = recordId)
+
+        viewModelScope.launch {
+            demoSeedingJob.join()
+            if (mutationSession != sessionGeneration) return@launch
+
+            val persistedEntity = try {
+                flushingDao.findById(recordId)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                failFlushingDelete(
+                    mutationSession,
+                    "No se pudo recuperar el flushing guardado. Inténtalo nuevamente."
+                )
+                return@launch
+            }
+
+            if (persistedEntity == null) {
+                failFlushingDelete(
+                    mutationSession,
+                    "El flushing ya no existe o fue eliminado."
+                )
+                return@launch
+            }
+
+            val persisted = persistedEntity.toModel()
+            if (!canManageFlushing(_currentUser.value, persisted, repository)) {
+                failFlushingDelete(
+                    mutationSession,
+                    "No tienes autorización para eliminar este flushing."
+                )
+                return@launch
+            }
+
+            val affectedRows = try {
+                flushingDao.delete(persistedEntity)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                failFlushingDelete(
+                    mutationSession,
+                    "No se pudo eliminar el flushing. Revisa el almacenamiento e inténtalo nuevamente."
+                )
+                return@launch
+            }
+
+            if (affectedRows != 1) {
+                failFlushingDelete(
+                    mutationSession,
+                    "No se pudo confirmar la eliminación del flushing. Inténtalo nuevamente."
+                )
+                return@launch
+            }
+
+            removeOwnedPhotoIfUnreferenced(persisted.photoUri)
+            if (mutationSession != sessionGeneration) return@launch
+
+            if (_editingFlushing.value?.id == recordId) _editingFlushing.value = null
+            _flushingDelete.value = FlushingDeleteUiState(deletedRecordId = recordId)
+        }
+    }
+
+    private fun failFlushingWrite(session: Long, message: String) {
+        if (session != sessionGeneration) return
+        flushingSubmissionGate.unlock()
+        _flushingSave.value = FlushingSaveUiState(errorMessage = message)
+    }
+
+    private fun failFlushingDelete(session: Long, message: String) {
+        if (session != sessionGeneration) return
+        flushingSubmissionGate.unlock()
+        _flushingDelete.value = FlushingDeleteUiState(errorMessage = message)
+    }
+
+    private suspend fun removeOwnedPhotoIfUnreferenced(photoUri: String?) {
+        photoUri ?: return
+        val application = getApplication<Application>()
+        if (!isOwnedFlushingPhotoUri(photoUri, application.packageName)) return
+
+        val referenceCount = try {
+            flushingDao.countPhotoReferences(photoUri)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            return
+        }
+        if (referenceCount != 0) return
+
+        withContext(Dispatchers.IO) {
+            runCatching {
+                application.contentResolver.delete(Uri.parse(photoUri), null, null)
+            }
+        }
+    }
+
+    private suspend fun seedDemoFlushingsIfNeeded() {
+        try {
+            DEMO_SEED_MUTEX.withLock {
+                val seedAlreadyCompleted = settingsStore.wereDemoFlushingsSeeded()
+                if (seedAlreadyCompleted) return@withLock
+
+                val storedRowCount = flushingDao.count()
+                if (
+                    shouldSeedDemoFlushings(
+                        seedAlreadyCompleted = false,
+                        databasePreviouslyExisted = databasePreviouslyExisted,
+                        storedRowCount = storedRowCount
+                    )
+                ) {
+                    flushingDao.insertAll(repository.initialFlushings.map { it.toEntity() })
+                }
+
+                // También marca instalaciones existentes para que un vaciado futuro sea definitivo.
+                settingsStore.markDemoFlushingsSeeded()
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // La aplicación puede continuar; al no marcar, un próximo arranque podrá reintentar.
+        }
+    }
+
+    private companion object {
+        const val DATABASE_NAME = "bebederos.db"
+        val DEMO_SEED_MUTEX = Mutex()
     }
 }

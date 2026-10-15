@@ -38,6 +38,7 @@ persistencia local, cámara y notificaciones, sin presentar datos simulados como
   - validaciones, reintento ante error y prevención de doble envío.
 - Confirmación visual únicamente después de que Room devuelve un ID válido.
 - Historial de flushing filtrado por granja, galpón y línea.
+- Edición y eliminación de flushing propios del operario, con validación nuevamente en el ViewModel.
 - Seguimiento global y registros recientes para supervisor.
 - Actualización de la temperatura efectiva desde la última medición manual posterior válida.
 - Perfil por rol, preferencias locales y cierre de sesión con limpieza del back stack.
@@ -48,14 +49,16 @@ persistencia local, cámara y notificaciones, sin presentar datos simulados como
 ### Operario
 
 El operario queda limitado a la granja indicada por su usuario. Puede consultar sus líneas y alertas,
-abrir detalles e historial, y registrar flushing. Una nueva sesión inicializa una selección válida y
-no hereda la selección que haya dejado otro rol.
+abrir detalles e historial, registrar flushing y modificar o eliminar únicamente registros propios.
+Una nueva sesión inicializa una selección válida y no hereda la selección que haya dejado otro rol.
+La autoría se compara por nombre porque el prototipo no dispone de un identificador estable de
+usuario; esta representación local no constituye una autorización robusta para producción.
 
 ### Supervisor
 
 El supervisor puede recorrer todas las granjas, sus galpones y líneas. También consulta el historial
-por línea, el seguimiento completo, los registros recientes y las alertas demostrativas. Su perfil
-indica acceso a todas las granjas.
+por línea, el seguimiento completo, los registros recientes y las alertas demostrativas, pero no
+modifica ni elimina flushing. Su perfil indica acceso a todas las granjas.
 
 ## Temperaturas y estados
 
@@ -147,8 +150,8 @@ Pantallas recompuestas con el estado actual
 
 Las columnas térmicas añadidas son anulables para conservar fielmente registros antiguos. Un contexto
 heredado no se presenta como medición manual posterior y no actualiza la línea efectiva. La base no
-usa migración destructiva. Los tres registros iniciales se insertan solamente cuando la tabla está
-vacía.
+usa migración destructiva. Los tres registros iniciales se insertan solo al crear una base nueva; una
+marca en DataStore impide restaurarlos después de que el usuario vacíe la tabla intencionalmente.
 
 Room guarda la URI textual de una fotografía. El JPEG permanece en
 `filesDir/flushing_images`; no se almacena como blob dentro de la base.
@@ -159,6 +162,7 @@ Preferences DataStore conserva:
 
 - si la leyenda de origen debe mostrarse de forma ampliada o compacta;
 - si el usuario desea avisos locales de alertas demostrativas.
+- si el sembrado inicial de flushing demo ya fue procesado.
 
 La clave histórica `offline_mode` no detecta conectividad ni habilita sincronización.
 
@@ -218,7 +222,7 @@ autenticación de producción.
 
 ## Pruebas y validación
 
-La suite actual contiene 65 pruebas unitarias en 13 clases. Cubre, entre otros aspectos:
+La suite actual contiene 75 pruebas unitarias en 14 clases. Cubre, entre otros aspectos:
 
 - etiquetas y umbrales térmicos;
 - validación 0–50 °C;
@@ -227,6 +231,7 @@ La suite actual contiene 65 pruebas unitarias en 13 clases. Cubre, entre otros a
 - prevención de doble envío;
 - fechas, orden y compatibilidad de registros;
 - conversiones entre modelo y Entity;
+- permisos, campos inmutables y política de sembrado del CRUD;
 - origen de datos, perfil y estados de lista.
 
 Ejecutar pruebas unitarias:
@@ -241,9 +246,9 @@ Compilar la APK debug:
 .\gradlew.bat :app:assembleDebug
 ```
 
-También existen tres pruebas instrumentadas de Room: migración directa 2→3, cadena 1→2→3 y
-persistencia reactiva de mediciones manuales después de migrar y reabrir la base. Requieren un
-emulador o dispositivo y se ejecutan, cuando corresponda, con:
+También existen nueve pruebas instrumentadas de Room: las migraciones y persistencia históricas,
+más actualización, eliminación, emisiones reactivas, reinicio de base y referencias fotográficas
+compartidas. Requieren un emulador o dispositivo y se ejecutan, cuando corresponda, con:
 
 ```powershell
 .\gradlew.bat :app:connectedDebugAndroidTest
