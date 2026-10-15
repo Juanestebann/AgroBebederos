@@ -1,5 +1,7 @@
 package cl.ariztia.bebederos.ui.components
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,6 +13,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -32,7 +35,17 @@ fun statusColors(status: TemperatureStatus): Pair<Color, Color> = when (status) 
 /** Badge reutilizable que presenta el estado con etiqueta en español y colores consistentes. */
 @Composable
 fun StatusBadge(status: TemperatureStatus) {
-    val (color, background) = statusColors(status)
+    val (targetColor, targetBackground) = statusColors(status)
+    val color by animateColorAsState(
+        targetValue = targetColor,
+        animationSpec = tween(durationMillis = 220),
+        label = "statusBadgeContentColor"
+    )
+    val background by animateColorAsState(
+        targetValue = targetBackground,
+        animationSpec = tween(durationMillis = 220),
+        label = "statusBadgeBackgroundColor"
+    )
     Row(
         modifier = Modifier.background(background, RoundedCornerShape(100.dp)).padding(horizontal = 9.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,

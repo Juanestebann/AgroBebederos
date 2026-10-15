@@ -8,6 +8,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.scaleIn
@@ -301,6 +302,15 @@ fun LineDetailScreen(viewModel: AppViewModel, supervisorMode: Boolean, onBack: (
     val farm = viewModel.farm(line.farmId)
     val shed = viewModel.shed(line.shedId)
     val (color, bg) = statusColors(line.status)
+    val ringWidth by animateDpAsState(
+        targetValue = when (line.status) {
+            TemperatureStatus.NORMAL -> 3.dp
+            TemperatureStatus.WARNING -> 5.dp
+            TemperatureStatus.CRITICAL -> 7.dp
+        },
+        animationSpec = tween(durationMillis = 220),
+        label = "lineTemperatureRingWidth"
+    )
     Scaffold(
         topBar = { AppTopBar(line.name, "${shed?.name} · ${farm?.name}", onBack) },
         bottomBar = {
@@ -313,7 +323,7 @@ fun LineDetailScreen(viewModel: AppViewModel, supervisorMode: Boolean, onBack: (
     ) { inner ->
         Column(Modifier.fillMaxSize().padding(inner).background(Color.White).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             SectionCard {
-                Box(Modifier.size(150.dp).align(Alignment.CenterHorizontally).background(bg, CircleShape).border(5.dp, color, CircleShape), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(150.dp).align(Alignment.CenterHorizontally).background(bg, CircleShape).border(ringWidth, color, CircleShape), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("${line.temperature}°C", color = color, fontSize = 32.sp, fontWeight = FontWeight.Bold)
                         Icon(Icons.Default.DeviceThermostat, null, tint = color)
